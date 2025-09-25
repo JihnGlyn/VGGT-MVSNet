@@ -52,13 +52,15 @@ class run_all(nn.Module):
         self.feature_fusion = FeatureFuse(base_channels=16)
         self.refinement = RefineNet(base_channels=8)
 
-    def forward(self, model, imgs, num_depths, depth_interal_ratio, pair):
+    def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair):
         # [N] imgs -> [1] ref + [N-1] srcs
         imgs_coarse = imgs["level_2"]
         imgs_mid = imgs["level_1"]
         imgs_fine = imgs["level_0"]
         del imgs
         view_weights = None
+        search_ratio = depth_interal_ratio.clone()
+        supervised_depths = []
 
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
         extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_coarse, dtype=torch.float32)
@@ -82,35 +84,45 @@ class run_all(nn.Module):
         if pair is not None:    # EVALUATION MODE
             _, nviews, _ = pair.shape
             pair_unbind = torch.unbind(pair, dim=1)
-            depths = []
+            infer_depths = []
             for i in range(nviews):
                 ref_proj = proj_mats[i]
                 src_projs = [proj_mats[j] for j in pair_unbind[i]]
                 ref_fea = features[i]
                 src_feas = [features[j] for j in pair_unbind[i]]
-                ref_depth = vggt_depths_upscaled[i].squeeze(0)  # [B,1,H,W] -> [B,H,W]
+                depth_hypo = vggt_depths_upscaled[i].squeeze(0)  # [B,1,H,W] -> [B,H,W]
 
                 # Step 5. Depth Hypothesis and MVS: MVSNet ->depth/confidence (mid-res) # TODO: ITERATIVE AND SHRINK RATIO
-                depth_hypo = get_cur_depth_range_samples(ref_depth, num_depths, depth_interal_ratio)
-                mvsnet_outputs = self.mvs(ref_fea, src_feas, ref_proj, src_projs, depth_hypo, view_weights)
+                for _ in range(iteration):
+                    depth_hypo = get_cur_depth_range_samples(depth_hypo, num_depths, search_ratio)
+                    mvsnet_outputs = self.mvs(ref_fea, src_feas, ref_proj, src_projs, depth_hypo, view_weights)
+                    search_ratio *= 0.5
+                    view_weights = mvsnet_outputs["view_weights"]
+                    depth_hypo = mvsnet_outputs["depth"]
 
                 # Step 6. Refinement and Upscale: Refinenet -> depth/confidence (high-res)
-                depth = self.refinement(imgs_fine, mvsnet_outputs["depth"], depth_min, depth_max)
-                depths.append(depth)
+                depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
+                infer_depths.append(depth_refined)
 
-            return depths
+            return infer_depths  # List(N)*[B,1,H,W]
         else:   # TRAIN MODE
             ref_proj, src_projs = proj_mats[0], proj_mats[1:]
             ref_fea, src_feas = features[0], features[1:]
-            ref_depth = vggt_depths_upscaled[0].squeeze(0)  # [B,1,H,W] -> [B,H,W]
+            depth_hypo = vggt_depths_upscaled[0].squeeze(0)  # [B,1,H,W] -> [B,H,W]
 
             # Step 5. Depth Hypothesis and MVS: MVSNet ->depth/confidence (mid-res) # TODO: ITERATIVE AND SHRINK RATIO
-            depth_hypo = get_cur_depth_range_samples(ref_depth, num_depths, depth_interal_ratio)
-            mvsnet_outputs = self.mvs(ref_fea, src_feas, ref_proj, src_projs, depth_hypo, view_weights)
+            for _ in range(iteration):
+                depth_hypo = get_cur_depth_range_samples(depth_hypo, num_depths, search_ratio)
+                mvsnet_outputs = self.mvs(ref_fea, src_feas, ref_proj, src_projs, depth_hypo, view_weights)
+                search_ratio *= 0.5
+                view_weights = mvsnet_outputs["view_weights"]
+                depth_hypo = mvsnet_outputs["depth"]
+                supervised_depths.append(depth_hypo)
 
             # Step 6. Refinement and Upscale: Refinenet -> depth/confidence (high-res)
-            depth = self.refinement(imgs_fine, mvsnet_outputs["depth"], depth_min, depth_max)
+            depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
+            supervised_depths.append(depth_refined)
 
-            return depth
+            return supervised_depths    # List [(iter)*[B,H/2,W/2], [B,1,H,W]]
 
 
