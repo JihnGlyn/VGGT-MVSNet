@@ -1,5 +1,4 @@
 {
-    "mode": "train",
     "device": "cuda",
     "dataset": "dtu",
     "trainpath": "/path/to/train/data",

@@ -148,7 +148,6 @@ if __name__ == '__main__':
 
     device = torch.device(args.device)
     if args.resume:
-        assert args.mode == "train"
         assert args.loadckpt is None
     if args.testpath is None:
         args.testpath = args.trainpath
@@ -157,13 +156,12 @@ if __name__ == '__main__':
     torch.cuda.manual_seed(args.seed)
 
     # create logger for mode "train" and "testall"
-    if args.mode == "train":
-        if not os.path.isdir(args.logdir):
-            os.makedirs(args.logdir)
-        current_time_str = str(datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
-        print("current time", current_time_str)
-        print("creating new summary file")
-        logger = SummaryWriter(args.logdir)
+    if not os.path.isdir(args.logdir):
+        os.makedirs(args.logdir)
+    current_time_str = str(datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
+    print("current time", current_time_str)
+    print("creating new summary file")
+    logger = SummaryWriter(args.logdir)
     print("argv:", sys.argv[1:])
     print_args(args)
 
@@ -215,7 +213,5 @@ if __name__ == '__main__':
     TestImgLoader = DataLoader(test_dataset, args.batch_size, shuffle=False, num_workers=4, drop_last=False,
                                pin_memory=args.pin_m)
 
-    if args.mode == "train":
-        train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args)
-    else:
-        raise NotImplementedError
+    train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args)
+
