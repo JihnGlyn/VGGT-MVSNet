@@ -1,0 +1,23 @@
+{
+    "mode": "train",
+    "device": "cuda",
+    "dataset": "dtu",
+    "trainpath": "/path/to/train/data",
+    "testpath": "/path/to/test/data",
+    "trainlist": "/path/to/train/list",
+    "testlist": "/path/to/test/list",
+    "epochs": 16,
+    "lr": 0.001,
+    "lrepochs": "4,6,8:2",
+    "wd": 0.0001,
+    "nviews": 5,
+    "batch_size": 1,
+    "loadckpt": null,
+    "logdir": "./checkpoints",
+    "resume": false,
+    "summary_freq": 10,
+    "save_freq": 1,
+    "seed": 1,
+    "pin_m": false,
+    "dlossw": "0.5,1.0,2.0"
+}
