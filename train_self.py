@@ -24,8 +24,8 @@ cudnn.benchmark = True
 num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
 
 
-def load_config_from_json(parser, json_file_path='./config/default.json'):
-    args = parser.parse_args()
+def load_config_from_json(myparser, json_file_path='./config/default.json'):
+    args = myparser.parse_args()
     try:
         with open(json_file_path, 'r') as f:
             config = json.load(f)
@@ -141,7 +141,7 @@ def train_sample(model, model_loss, optimizer, sample, is_training, args):
 
 
 if __name__ == '__main__':
-    # args = parser.parse_args()
+    # args = myparser.parse_args()
     parser = argparse.ArgumentParser(description='A PyTorch Implementation of VGGT4MVS')
     json_file = './config/default.json'
     args = load_config_from_json(parser, json_file)
