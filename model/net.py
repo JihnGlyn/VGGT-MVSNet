@@ -52,7 +52,7 @@ class VGGT4MVS(nn.Module):
         self.feature_fusion = FeatureFuse(base_channels=16)
         self.refinement = RefineNet(base_channels=8)
 
-    def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair):
+    def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair=None):
         # [N] imgs -> [1] ref + [N-1] srcs
         imgs_coarse = imgs["level_2"]
         imgs_mid = imgs["level_1"]
@@ -60,7 +60,7 @@ class VGGT4MVS(nn.Module):
         del imgs
         view_weights = None
         search_ratio = depth_interal_ratio.clone()
-        supervised_depths = []
+        output_depths = []
 
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
         extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_coarse, dtype=torch.float32)
@@ -70,7 +70,11 @@ class VGGT4MVS(nn.Module):
         
         # Step 2. VGGT to MVS: condition intrinsic/extrinsic -> proj
         proj_matrices = postprocess_cams(intrinsic, extrinsic)
+        proj_matrices_4 = postprocess_cams(intrinsic, extrinsic, 4)
         proj_mats = torch.unbind(proj_matrices, dim=1)
+
+        output_projs = [proj_matrices, proj_matrices_4]
+        del proj_matrices, proj_matrices_4, intrinsic, extrinsic
 
         # Step 3. Feature Fusion: upscale depth/features + FPNfeatures -> features
         features = []
@@ -104,7 +108,7 @@ class VGGT4MVS(nn.Module):
                 depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
                 infer_depths.append(depth_refined)
 
-            return infer_depths  # List(N)*[B,1,H,W]
+            return {"depths": infer_depths}  # List(N)*[B,1,H,W]
         else:   # TRAIN MODE
             ref_proj, src_projs = proj_mats[0], proj_mats[1:]
             ref_fea, src_feas = features[0], features[1:]
@@ -117,12 +121,12 @@ class VGGT4MVS(nn.Module):
                 search_ratio *= 0.5
                 view_weights = mvsnet_outputs["view_weights"]
                 depth_hypo = mvsnet_outputs["depth"]
-                supervised_depths.append(depth_hypo)
+                output_depths.append(depth_hypo)
 
             # Step 6. Refinement and Upscale: Refinenet -> depth/confidence (high-res)
             depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
-            supervised_depths.append(depth_refined)
+            output_depths.append(depth_refined)
 
-            return supervised_depths    # List [(iter)*[B,H/2,W/2], [B,1,H,W]]
+            return {"depth": output_depths, "proj": output_projs}    # List [(iter)*[B,H/2,W/2], [B,1,H,W]]
 
 

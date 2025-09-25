@@ -9,7 +9,7 @@ from torchvision import transforms
 
 
 class MVSDataset(Dataset):
-    def __init__(self, datapath, listfile, mode, nviews, robust_train=False, require_pair=False):
+    def __init__(self, datapath, listfile, mode, nviews, robust_train=False):
         super(MVSDataset, self).__init__()
 
         self.levels = 2
@@ -22,7 +22,6 @@ class MVSDataset(Dataset):
         else:
             self.img_wh = (640, 512)
         self.robust_train = robust_train
-        self.require_pair = require_pair
 
         assert self.mode in ["train", "val", "test"]
         self.metas = self.build_list()
@@ -114,10 +113,8 @@ class MVSDataset(Dataset):
             num_src_views = len(src_views)
             index = random.sample(range(num_src_views), self.nviews - 1)
             view_ids = [ref_view] + [src_views[i] for i in index]
-            scale = random.uniform(0.8, 1.25)
         else:
             view_ids = [ref_view] + src_views[:self.nviews - 1]
-            scale = 1
 
         imgs_0 = []
         imgs_1 = []
@@ -136,7 +133,7 @@ class MVSDataset(Dataset):
             imgs_2.append(imgs['level_2'])
 
             if i == 0:  # reference view
-                _, mask = self.read_depth_mask(depth_filename, mask_filename, scale)
+                _, mask = self.read_depth_mask(depth_filename, mask_filename, 1)
 
                 for l in range(self.levels):
                     mask[f'level_{l}'] = np.expand_dims(mask[f'level_{l}'], 2)
