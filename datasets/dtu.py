@@ -8,9 +8,9 @@ import random
 from torchvision import transforms
 
 
-class DTUDataset(Dataset):
+class MVSDataset(Dataset):
     def __init__(self, datapath, listfile, mode, nviews, robust_train=False, require_pair=False):
-        super(DTUDataset, self).__init__()
+        super(MVSDataset, self).__init__()
 
         self.levels = 2
         self.datapath = datapath

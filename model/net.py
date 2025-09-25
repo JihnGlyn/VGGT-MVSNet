@@ -44,9 +44,9 @@ def postprocess_cams(intrinsic, extrinsic, scale: float = 2.0):
     return proj
 
 
-class run_all(nn.Module):
-    def __init__(self, G):
-        super(run_all, self).__init__()
+class VGGT4MVS(nn.Module):
+    def __init__(self, G=8):
+        super(VGGT4MVS, self).__init__()
         self.G = G
         self.mvs = MVSNet(G)
         self.feature_fusion = FeatureFuse(base_channels=16)

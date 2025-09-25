@@ -96,6 +96,10 @@ def tocuda(vars):
         raise NotImplementedError("invalid input type {} for tocuda".format(type(vars)))
 
 
+class NanError(Exception):
+    pass
+
+
 def save_scalars(logger, mode, scalar_dict, global_step):
     scalar_dict = tensor2float(scalar_dict)
     for key, value in scalar_dict.items():

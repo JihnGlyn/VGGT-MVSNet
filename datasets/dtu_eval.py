@@ -7,9 +7,9 @@ import cv2
 import random
 
 
-class DTUDataset(Dataset):
+class MVSDataset(Dataset):
     def __init__(self, datapath, listfile, nviews):
-        super(DTUDataset, self).__init__()
+        super(MVSDataset, self).__init__()
         self.datapath = datapath
         self.listfile = listfile
         self.nviews = nviews
