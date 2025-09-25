@@ -1,17 +1,22 @@
-import torch
-import torch.nn as nn
 import torch.nn.parallel
+import argparse
+import datetime
+import gc
+import json
+import os
+import sys
+import time
+
 import torch.backends.cudnn as cudnn
+import torch.nn.parallel
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import argparse, os, sys, time, gc, datetime, random, json
-
 from torch.utils.tensorboard import SummaryWriter
 
 # from tensorboardX import SummaryWriter
 from datasets import find_dataset_def
-from model.net import *
 from model.loss import *
+from model.net import *
 from utils import *
 
 cudnn.benchmark = True
