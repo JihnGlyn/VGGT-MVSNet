@@ -115,7 +115,7 @@ def train_sample(model, model_loss, optimizer, sample, is_training, args):
                     )
     depth_est = outputs["depth"]
 
-    loss, recon_loss, ssim_loss, smooth_loss = model_loss(outputs, sample_cuda["imgs"],
+    loss, recon_loss, ssim_loss, smooth_loss = model_loss(depth_est, sample_cuda["imgs"],
                                                           outputs["proj"],
                                                           dlossw=[float(e) for e in args.dlossw.split(",") if e])
 
