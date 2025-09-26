@@ -10,6 +10,7 @@
     "lrepochs": "4,6,8:2",
     "wd": 0.0001,
     "nviews": 5,
+    "depth_interal_ratio": 0.25,
     "batch_size": 1,
     "loadckpt": null,
     "logdir": "./checkpoints",
