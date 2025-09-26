@@ -44,6 +44,27 @@ def postprocess_cams(intrinsic, extrinsic, scale: float = 2.0):
     return proj
 
 
+def extract_depth_range(depth, conf, threshold):
+    """
+
+    :param depth: [B, N, H, W]
+    :param conf: [B, N, H, W]
+    :param threshold:
+    :return: [B] [B]
+    """
+    mask = conf > threshold
+    depth_masked = torch.where(mask, depth, torch.tensor(float('-inf'), dtype=depth.dtype, device=depth.device))
+    max_depths = torch.max(depth_masked.view(depth.shape[0], -1), dim=1)[0]
+
+    depth_masked = torch.where(mask, depth, torch.tensor(float('inf'), dtype=depth.dtype, device=depth.device))
+    min_depths = torch.min(depth_masked.view(depth.shape[0], -1), dim=1)[0]
+
+    max_depths = torch.where(torch.isinf(max_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device), max_depths)
+    min_depths = torch.where(torch.isinf(min_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device), min_depths)
+
+    return max_depths, min_depths
+
+
 class VGGT4MVS(nn.Module):
     def __init__(self, G=8):
         super(VGGT4MVS, self).__init__()
@@ -65,7 +86,7 @@ class VGGT4MVS(nn.Module):
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
         extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_coarse, dtype=torch.float32)
         vggt_depths_upscaled = F.interpolate(vggt_depths, scale_factor=2.0, mode='bilinear', align_corners=False)
-        depth_min, depth_max = vggt_depths.min(), vggt_depths.max()  # TODO: better way? considering confidence threshold
+        depth_min, depth_max = extract_depth_range(vggt_depths_upscaled, vggt_confs, threshold=5)
         B, _, H, W = vggt_depths_upscaled.shape
         
         # Step 2. VGGT to MVS: condition intrinsic/extrinsic -> proj
