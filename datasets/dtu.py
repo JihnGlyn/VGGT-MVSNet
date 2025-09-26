@@ -34,7 +34,7 @@ class MVSDataset(Dataset):
             scans = [line.rstrip() for line in scans]
 
         for scan in scans:
-            pair_file = "Cameras_1/pair.txt"
+            pair_file = "Cameras/pair.txt"
 
             with open(os.path.join(self.datapath, pair_file)) as f:
                 self.num_viewpoint = int(f.readline())
@@ -86,7 +86,7 @@ class MVSDataset(Dataset):
 
     def read_depth_mask(self, filename, mask_filename, scale):
         depth_hr = np.array(read_pfm(filename)[0], dtype=np.float32) * scale
-        depth_hr = np.squeeze(depth_hr, 2)
+        # depth_hr = np.squeeze(depth_hr, 2)
         depth_lr = self.prepare_img(depth_hr)
         mask = self.read_mask(mask_filename)
         mask = self.prepare_img(mask)
