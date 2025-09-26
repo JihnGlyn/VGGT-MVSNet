@@ -143,8 +143,32 @@ def train_sample(model, model_loss, optimizer, sample, is_training, args):
 if __name__ == '__main__':
     # args = myparser.parse_args()
     parser = argparse.ArgumentParser(description='A PyTorch Implementation of VGGT4MVS')
-    json_file = './config/default.json'
-    args = load_config_from_json(parser, json_file)
+    parser.add_argument('--mode', default='train', help='train or test', choices=['train'])
+    parser.add_argument('--device', default='cuda', help='select model')
+    parser.add_argument('--dataset', default='dtu', help='select dataset')
+    parser.add_argument('--trainpath', help='train datapath')
+    parser.add_argument('--testpath', help='test datapath')
+    parser.add_argument('--trainlist', help='train list')
+    parser.add_argument('--testlist', help='test list')
+    parser.add_argument('--epochs', type=int, default=16, help='number of epochs to train')
+    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
+    parser.add_argument('--lrepochs', type=str, default="4,6,8:2",
+                        help='epoch ids to downscale lr and the downscale rate')
+    parser.add_argument('--wd', type=float, default=0.0001, help='weight decay')
+    parser.add_argument('--nviews', type=int, default=5, help='total number of views')
+    parser.add_argument('--depth_interal_ratio', type=float, default=0.25, help='search range')
+    parser.add_argument('--batch_size', type=int, default=1, help='train batch size')
+    parser.add_argument('--loadckpt', default=None, help='load a specific checkpoint')
+    parser.add_argument('--logdir', default='./checkpoints', help='the directory to save checkpoints/logs')
+    parser.add_argument('--resume', action='store_true', help='continue to train the model')
+    parser.add_argument('--summary_freq', type=int, default=10, help='print and summary frequency')
+    parser.add_argument('--save_freq', type=int, default=1, help='save checkpoint frequency')
+    parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed')
+    parser.add_argument('--pin_m', action='store_true', help='data loader pin memory')
+    parser.add_argument('--dlossw', type=str, default="0.5,1.0,2.0", help='depth loss weight for different stage')
+    # json_file = './config/default.json'
+    # args = load_config_from_json(parser, json_file)
+    args = parser.parse_args()
 
     device = torch.device(args.device)
     if args.resume:
