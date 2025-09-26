@@ -80,7 +80,6 @@ class VGGT4MVS(nn.Module):
         imgs_fine = imgs["level_0"]
         del imgs
         view_weights = None
-        search_ratio = depth_interal_ratio.clone()
         output_depths = []
 
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
@@ -119,9 +118,9 @@ class VGGT4MVS(nn.Module):
 
                 # Step 5. Depth Hypothesis and MVS: MVSNet ->depth/confidence (mid-res) # TODO: ITERATIVE AND SHRINK RATIO
                 for _ in range(iteration):
-                    depth_hypo = get_cur_depth_range_samples(depth_hypo, num_depths, search_ratio)
+                    depth_hypo = get_cur_depth_range_samples(depth_hypo, num_depths, depth_interal_ratio)
                     mvsnet_outputs = self.mvs(ref_fea, src_feas, ref_proj, src_projs, depth_hypo, view_weights)
-                    search_ratio *= 0.5
+                    depth_interal_ratio *= 0.5
                     view_weights = mvsnet_outputs["view_weights"]
                     depth_hypo = mvsnet_outputs["depth"]
 
@@ -137,9 +136,9 @@ class VGGT4MVS(nn.Module):
 
             # Step 5. Depth Hypothesis and MVS: MVSNet ->depth/confidence (mid-res) # TODO: ITERATIVE AND SHRINK RATIO
             for _ in range(iteration):
-                depth_hypo = get_cur_depth_range_samples(depth_hypo, num_depths, search_ratio)
+                depth_hypo = get_cur_depth_range_samples(depth_hypo, num_depths, depth_interal_ratio)
                 mvsnet_outputs = self.mvs(ref_fea, src_feas, ref_proj, src_projs, depth_hypo, view_weights)
-                search_ratio *= 0.5
+                depth_interal_ratio *= 0.5
                 view_weights = mvsnet_outputs["view_weights"]
                 depth_hypo = mvsnet_outputs["depth"]
                 output_depths.append(depth_hypo)

@@ -58,22 +58,25 @@ class MVSDataset(Dataset):
         # scale 0~255 to -1~1
         np_img = 2 * np.array(img, dtype=np.float32) / 255. - 1
         h, w, _ = np_img.shape
+
+        new_h, new_w = (h // 56) * 56, (w // 56) * 56
         np_img_ms = {
-            "level_2": cv2.resize(np_img, (w // 4, h // 4), interpolation=cv2.INTER_LINEAR),
-            "level_1": cv2.resize(np_img, (w // 2, h // 2), interpolation=cv2.INTER_LINEAR),
-            "level_0": np_img
+            "level_2": cv2.resize(np_img, (new_w // 4, new_h // 4), interpolation=cv2.INTER_LINEAR),
+            "level_1": cv2.resize(np_img, (new_w // 2, new_h // 2), interpolation=cv2.INTER_LINEAR),
+            "level_0": cv2.resize(np_img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         }
         return np_img_ms
 
     def prepare_img(self, hr_img):
         # downsample
         h, w = hr_img.shape
+        new_h, new_w = (h // 56) * 56, (w // 56) * 56
         # original w,h: 1600, 1200; downsample -> 800, 600 ; crop -> 640, 512
-        hr_img = cv2.resize(hr_img, (w // 2, h // 2), interpolation=cv2.INTER_NEAREST)
+        hr_img = cv2.resize(hr_img, (new_w // 2, new_h // 2), interpolation=cv2.INTER_NEAREST)
         # crop
         h, w = hr_img.shape
         target_h, target_w = self.img_wh[1], self.img_wh[0]
-        start_h, start_w = (h - target_h) // 2, (w - target_w) // 2
+        start_h, start_w = (new_h - target_h) // 2, (new_w - target_w) // 2
         hr_img_crop = hr_img[start_h: start_h + target_h, start_w: start_w + target_w]
 
         return hr_img_crop
