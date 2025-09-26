@@ -157,6 +157,7 @@ if __name__ == '__main__':
     parser.add_argument('--wd', type=float, default=0.0001, help='weight decay')
     parser.add_argument('--nviews', type=int, default=5, help='total number of views')
     parser.add_argument('--num_depths', type=int, default=8, help='total number of depths')
+    parser.add_argument('--iteration', type=int, default=2, help='total number of iterations')
     parser.add_argument('--depth_interal_ratio', type=float, default=0.25, help='search range')
     parser.add_argument('--batch_size', type=int, default=1, help='train batch size')
     parser.add_argument('--loadckpt', default=None, help='load a specific checkpoint')
