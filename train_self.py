@@ -143,7 +143,6 @@ def train_sample(model, model_loss, optimizer, sample, is_training, args):
 if __name__ == '__main__':
     # args = myparser.parse_args()
     parser = argparse.ArgumentParser(description='A PyTorch Implementation of VGGT4MVS')
-    parser.add_argument('--mode', default='train', help='train or test', choices=['train'])
     parser.add_argument('--device', default='cuda', help='select model')
     parser.add_argument('--dataset', default='dtu', help='select dataset')
     parser.add_argument('--trainpath', help='train datapath')
@@ -168,9 +167,9 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed')
     parser.add_argument('--pin_m', action='store_true', help='data loader pin memory')
     parser.add_argument('--dlossw', type=str, default="0.5,1.0,2.0", help='depth loss weight for different stage')
-    # json_file = './config/default.json'
-    # args = load_config_from_json(parser, json_file)
-    args = parser.parse_args()
+    json_file = './config/default.json'
+    args = load_config_from_json(parser, json_file)
+    # args = parser.parse_args()
 
     device = torch.device(args.device)
     if args.resume:
