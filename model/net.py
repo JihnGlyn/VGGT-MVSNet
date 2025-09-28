@@ -77,7 +77,7 @@ class VGGT4MVS(nn.Module):
         # [N] imgs -> [1] ref + [N-1] srcs
         imgs_coarse = imgs["level_2"].squeeze(0)
         imgs_mid = imgs["level_1"].squeeze(0)
-        imgs_fine = imgs["level_0"].squeeze(0)
+        imgs_fine = imgs["level_0"][:, 0].squeeze(1)    # ref view [B,N,3,H,W]->[B,3,H,W]
         del imgs
         view_weights = None
         output_depths = []
@@ -85,7 +85,7 @@ class VGGT4MVS(nn.Module):
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
         extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_coarse, dtype=torch.float32)
         vggt_depths_upscaled = F.interpolate(vggt_depths, scale_factor=2.0, mode='bilinear', align_corners=False)
-        depth_min, depth_max = extract_depth_range(vggt_depths_upscaled, vggt_confs, threshold=5)
+        depth_min, depth_max = extract_depth_range(vggt_depths, vggt_confs, threshold=5)
         B, _, H, W = vggt_depths_upscaled.shape
         
         # Step 2. VGGT to MVS: condition intrinsic/extrinsic -> proj
