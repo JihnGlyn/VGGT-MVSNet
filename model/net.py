@@ -75,9 +75,9 @@ class VGGT4MVS(nn.Module):
 
     def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair=None):
         # [N] imgs -> [1] ref + [N-1] srcs
-        imgs_coarse = imgs["level_2"]
-        imgs_mid = imgs["level_1"]
-        imgs_fine = imgs["level_0"]
+        imgs_coarse = imgs["level_2"].squeeze(0)
+        imgs_mid = imgs["level_1"].squeeze(0)
+        imgs_fine = imgs["level_0"].squeeze(0)
         del imgs
         view_weights = None
         output_depths = []
@@ -132,7 +132,7 @@ class VGGT4MVS(nn.Module):
         else:   # TRAIN MODE
             ref_proj, src_projs = proj_mats[0], proj_mats[1:]
             ref_fea, src_feas = features[0], features[1:]
-            depth_hypo = vggt_depths_upscaled[0].squeeze(0)  # [B,1,H,W] -> [B,H,W]
+            depth_hypo = vggt_depths_upscaled[:, 0].squeeze(1)  # [B,1,H,W] -> [B,H,W]
 
             # Step 5. Depth Hypothesis and MVS: MVSNet ->depth/confidence (mid-res) # TODO: ITERATIVE AND SHRINK RATIO
             for _ in range(iteration):

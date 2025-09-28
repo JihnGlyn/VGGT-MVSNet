@@ -248,6 +248,8 @@ class DPTHead(nn.Module):
         preds, conf = activate_head(out_, activation=self.activation, conf_activation=self.conf_activation)
 
         out = out.view(B, S, *out.shape[1:])
+        _, _, C, _, _ = out.shape
+        out = out.view(B, S, 16, C // 16, H, W).mean(dim=3, keepdim=False)
         preds = preds.view(B, S, *preds.shape[1:])
         conf = conf.view(B, S, *conf.shape[1:])
         return preds, conf, out
