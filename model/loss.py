@@ -22,7 +22,7 @@ class unsup_loss(nn.Module):
 
         depths_mr, depth_hr = depths[:-1], depths[-1]
         imgs_mr, imgs_hr = imgs["level_1"], imgs["level_0"]
-        cam_mr, cam_hr = sample_cams[0], sample_cams[-1]
+        cam_mr, cam_hr = sample_cams["level_1"], sample_cams["level_0"]
         stage_idx = 0
 
         for depth_mr in depths_mr:
@@ -35,7 +35,7 @@ class unsup_loss(nn.Module):
 
             smooth_loss += depth_smoothness(depth_est.unsqueeze(dim=-1), ref_img, 1.0)
             for view in range(1, num_views):
-                view_img = imgs[:, view]
+                view_img = imgs_mr[:, view]
                 view_cam = cam_mr[:, view]
                 view_img = F.interpolate(view_img, scale_factor=scale, mode='bilinear', align_corners=True)
                 view_img = view_img.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
@@ -57,7 +57,7 @@ class unsup_loss(nn.Module):
 
         smooth_loss += depth_smoothness(depth_est.unsqueeze(dim=-1), ref_img, 1.0)
         for view in range(1, num_views):
-            view_img = imgs[:, view]
+            view_img = imgs_hr[:, view]
             view_cam = cam_hr[:, view]
             view_img = F.interpolate(view_img, scale_factor=scale, mode='bilinear', align_corners=True)
             view_img = view_img.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
