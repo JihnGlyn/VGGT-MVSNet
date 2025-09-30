@@ -50,6 +50,7 @@ class MVSDataset(Dataset):
         np_img = 2 * np.array(img, dtype=np.float32) / 255. - 1
         np_img = cv2.resize(np_img, self.img_wh, interpolation=cv2.INTER_LINEAR)
         h, w, _ = np_img.shape
+        h, w = (h // 56) * 56, (w // 56) * 56
         np_img_ms = {
             "level_2": cv2.resize(np_img, (w // 4, h // 4), interpolation=cv2.INTER_LINEAR),
             "level_1": cv2.resize(np_img, (w // 2, h // 2), interpolation=cv2.INTER_LINEAR),
