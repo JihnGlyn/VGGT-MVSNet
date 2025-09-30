@@ -188,10 +188,10 @@ if __name__ == '__main__':
     print("argv:", sys.argv[1:])
     print_args(args)
 
-    LOCAL_MODEL = False
+    LOCAL_MODEL = True
     vggt_model = VGGT()
     if LOCAL_MODEL:
-        vggt_model_path = ""
+        vggt_model_path = ""    # todo: select path
         vggt_model.load_state_dict(torch.load(vggt_model_path, map_location=device))
     else:
         _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
