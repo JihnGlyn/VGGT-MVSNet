@@ -62,10 +62,11 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
                 save_scalars(logger, 'train', scalar_outputs, global_step)
                 save_images(logger, 'train', image_outputs, global_step)
                 print(
-                    "Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, train loss:{:.3f}, recon loss:{:.3f}, ssim loss:{:.3f}, smooth loss:{:.3f}, time:{:.3f}".format(
+                    "Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, train loss:{:.3f}, recon loss:{:.3f}, fea loss:{:.3f}, ssim loss:{:.3f}, smooth loss:{:.3f}, time:{:.3f}".format(
                         epoch_idx, args.epochs, batch_idx, len(TrainImgLoader),
                         optimizer.param_groups[0]["lr"], loss,
                         scalar_outputs['recon_loss'],
+                        scalar_outputs['fea_recon_loss'],
                         scalar_outputs['ssim_loss'],
                         scalar_outputs['smooth_loss'],
                         time.time() - start_time))
@@ -80,10 +81,11 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
                 save_scalars(logger, 'test', scalar_outputs, global_step)
                 save_images(logger, 'test', image_outputs, global_step)
                 print(
-                    "Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, test loss:{:.3f}, recon loss:{:.3f}, ssim loss:{:.3f}, smooth loss:{:.3f}, time:{:.3f}".format(
+                    "Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, test loss:{:.3f}, recon loss:{:.3f}, fea loss:{:.3f}, ssim loss:{:.3f}, smooth loss:{:.3f}, time:{:.3f}".format(
                         epoch_idx, args.epochs, batch_idx, len(TestImgLoader),
                         optimizer.param_groups[0]["lr"], loss,
                         scalar_outputs['recon_loss'],
+                        scalar_outputs['fea_recon_loss'],
                         scalar_outputs['ssim_loss'],
                         scalar_outputs['smooth_loss'],
                         time.time() - start_time))
