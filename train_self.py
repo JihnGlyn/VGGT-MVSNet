@@ -45,7 +45,8 @@ def load_config_from_json(myparser, json_file_path='./config/default.json'):
 def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args):
     milestones = [len(TrainImgLoader) * int(epoch_idx) for epoch_idx in args.lrepochs.split(':')[0].split(',')]
     lr_gamma = 1 / float(args.lrepochs.split(':')[1])
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=lr_gamma, last_epoch=start_epoch - 1)
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=lr_gamma,
+                                                        last_epoch=start_epoch - 1)
 
     for epoch_idx in range(start_epoch, args.epochs):
         print("Epoch {}:".format(epoch_idx + 1))
@@ -98,26 +99,23 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
         gc.collect()
 
 
-def train_sample(model, model_loss, optimizer, sample, is_training, args):
+def train_sample(train_model, train_loss, train_optimizer, sample, is_training, args):
     if is_training:
-        model.train()
-        optimizer.zero_grad()
+        train_model.train()
+        train_optimizer.zero_grad()
     else:
-        model.eval()
+        train_model.eval()
 
     sample_cuda = tocuda(sample)
 
-    outputs = model(model=vggt_model,
-                    imgs=sample_cuda["imgs"],
-                    num_depths=args.num_depths,
-                    depth_interal_ratio=args.depth_interal_ratio,
-                    iteration=args.iteration,
-                    )
-    depth_est = outputs["depth"]
+    depth_est, cams, features = train_model(model=vggt_model,
+                                            imgs=sample_cuda["imgs"],
+                                            num_depths=args.num_depths,
+                                            depth_interal_ratio=args.depth_interal_ratio,
+                                            iteration=args.iteration,
+                                            )
 
-    loss, recon_loss, ssim_loss, smooth_loss = model_loss(depth_est, sample_cuda["imgs"],
-                                                          outputs["proj"],
-                                                          dlossw=[float(e) for e in args.dlossw.split(",") if e])
+    loss, recon_loss, fea_recon_loss, ssim_loss, smooth_loss = train_loss(depth_est, sample_cuda["imgs"], cams, features)
 
     if np.isnan(loss.item()):
         raise NanError
@@ -127,6 +125,7 @@ def train_sample(model, model_loss, optimizer, sample, is_training, args):
 
     scalar_outputs = {"loss": loss,
                       "recon_loss": recon_loss,
+                      "fea_recon_loss": fea_recon_loss,
                       "ssim_loss": ssim_loss,
                       "smooth_loss": smooth_loss,
                       }
@@ -134,7 +133,7 @@ def train_sample(model, model_loss, optimizer, sample, is_training, args):
     image_outputs = {"depth_1": depth_est[0],
                      "depth_2": depth_est[1],
                      "depth_3": depth_est[2],
-                     "ref_img": sample["imgs"][:, 0],
+                     "ref_img": sample["imgs"]["level_1"][:, 0],
                      }
 
     return tensor2float(scalar_outputs["loss"]), tensor2float(scalar_outputs), tensor2numpy(image_outputs)
@@ -166,7 +165,6 @@ if __name__ == '__main__':
     parser.add_argument('--save_freq', type=int, default=1, help='save checkpoint frequency')
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed')
     parser.add_argument('--pin_m', action='store_true', help='data loader pin memory')
-    parser.add_argument('--dlossw', type=str, default="0.5,1.0,2.0", help='depth loss weight for different stage')
     json_file = './config/default.json'
     args = load_config_from_json(parser, json_file)
     # args = parser.parse_args()
@@ -230,7 +228,7 @@ if __name__ == '__main__':
     print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
     if torch.cuda.is_available():
-        print("Let's use", torch.cuda.device_count(), "GPUs!")
+        print(torch.cuda.device_count(), "GPUs detected!")
         model = nn.DataParallel(model)
 
     # dataset, dataloader
@@ -244,4 +242,3 @@ if __name__ == '__main__':
                                pin_memory=args.pin_m)
 
     train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args)
-

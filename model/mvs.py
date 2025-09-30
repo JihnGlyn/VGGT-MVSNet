@@ -89,13 +89,8 @@ class MVSNet(nn.Module):
         similarity_sum = 0
         pixel_wise_weight_sum = 1e-8
 
-        # ref_volume = ref_fea.unsqueeze(2).repeat(1, 1, D, 1, 1)
         ref_volume = ref_fea.view(B, self.G, C // self.G, 1, H, W)
         for i, (src_fea, src_proj) in enumerate(zip(src_feas, src_projs)):
-            # src_proj_new = src_proj[:, 0].clone()  # [B, 4, 4]
-            # src_proj_new[:, :3, :4] = torch.matmul(src_proj[:, 1, :3, :3], src_proj[:, 0, :3, :4])
-            # ref_proj_new = ref_proj[:, 0].clone()  # [B, 4, 4]
-            # ref_proj_new[:, :3, :4] = torch.matmul(ref_proj[:, 1, :3, :3], ref_proj[:, 0, :3, :4])
             # [B, C, D, H, W] -> [B, G, C/G, D, H, W]
             warped_volume = homo_warping(src_fea, src_proj, ref_proj, depth_hypo).view(B, self.G, C // self.G, D, H, W)
             similarity = (warped_volume * ref_volume).mean(2)  # B G D H W

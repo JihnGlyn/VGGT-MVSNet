@@ -166,7 +166,7 @@ class DPTHead(nn.Module):
                 all_fea.append(chunk_fea)
                 all_fea = torch.cat(all_fea, dim=1)
                 _, _, C, _, _ = all_fea.shape
-                all_fea = all_fea.view(B, S, 16, C // 16, H, W).mean(dim=3, keepdim=False)
+                all_fea = all_fea.view(B, S, 32, C // 32, H, W).mean(dim=3, keepdim=False)
 
         # Concatenate results along the sequence dimension
         if self.feature_only:
@@ -249,7 +249,7 @@ class DPTHead(nn.Module):
 
         out = out.view(B, S, *out.shape[1:])
         _, _, C, _, _ = out.shape
-        out = out.view(B, S, 16, C // 16, H, W).mean(dim=3, keepdim=False)
+        out = out.view(B, S, 32, C // 32, H, W).mean(dim=3, keepdim=False)
         preds = preds.view(B, S, *preds.shape[1:])
         conf = conf.view(B, S, *conf.shape[1:])
         return preds, conf, out

@@ -20,5 +20,4 @@
     "save_freq": 1,
     "seed": 1,
     "pin_m": false,
-    "dlossw": "0.5,1.0,2.0"
 }
