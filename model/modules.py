@@ -323,8 +323,8 @@ class PixelwiseNet(nn.Module):
             G: the feature channels of input will be divided evenly into G groups
         """
         super(PixelwiseNet, self).__init__()
-        self.conv0 = Conv3d(in_channels=G, out_channels=16, kernel_size=1, stride=1, pad=0)
-        self.conv1 = Conv3d(in_channels=16, out_channels=8, kernel_size=1, stride=1, pad=0)
+        self.conv0 = Conv3d(in_channels=G, out_channels=16, kernel_size=1, stride=1, padding=0)
+        self.conv1 = Conv3d(in_channels=16, out_channels=8, kernel_size=1, stride=1, padding=0)
         self.conv2 = nn.Conv3d(in_channels=8, out_channels=1, kernel_size=1, stride=1, padding=0)
         self.output = nn.Sigmoid()
 

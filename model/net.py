@@ -109,8 +109,12 @@ class VGGT4MVS(nn.Module):
         extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_coarse, dtype=torch.float32)
         fea_vggt_fuse, fea_loss = torch.split(fea_vggt, 16, 2)
         vggt_depths_upscaled = F.interpolate(vggt_depths, scale_factor=2.0, mode='bilinear', align_corners=False)
-        output_feature = {"level_1": F.interpolate(fea_loss, scale_factor=2.0, mode='bilinear', align_corners=False),
-                          "level_0": F.interpolate(fea_loss, scale_factor=4.0, mode='bilinear', align_corners=False)}
+        B, N, C, H, W = fea_loss.shape
+        fea_loss_ = fea_loss.view(B*N, C, H, W)
+        fea_loss_1 = F.interpolate(fea_loss_, scale_factor=2.0, mode='bilinear', align_corners=False)
+        fea_loss_0 = F.interpolate(fea_loss_, scale_factor=4.0, mode='bilinear', align_corners=False)
+        output_feature = {"level_1": fea_loss_1.view(B, N, C, H*2, W*2),
+                          "level_0": fea_loss_0.view(B, N, C, H*4, W*4)}
         depth_min, depth_max = extract_depth_range(vggt_depths, vggt_confs, threshold=5)
         
         # Step 2. VGGT to MVS: condition intrinsic/extrinsic -> proj
