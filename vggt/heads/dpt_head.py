@@ -269,11 +269,8 @@ class DPTHead(nn.Module):
         for i0 in range(0, out.shape[0], mini_batch):
             i1 = min(i0 + mini_batch, out.shape[0])
             out1[i0:i1] = self.scratch.output_conv2(out[i0:i1].float().contiguous())
-        out_ = out1
-        torch.cuda.empty_cache()
 
-        # out_ = self.scratch.output_conv2(out)
-        preds, conf = activate_head(out_, activation=self.activation, conf_activation=self.conf_activation)
+        preds, conf = activate_head(out1, activation=self.activation, conf_activation=self.conf_activation)
 
         out = out.view(B, S, *out.shape[1:])
         _, _, C, _, _ = out.shape
