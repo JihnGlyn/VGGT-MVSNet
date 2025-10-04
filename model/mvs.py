@@ -119,7 +119,8 @@ class MVSNet(nn.Module):
 
         if not wta:
             depth = depth_regression(prob_volume, depth_hypo)
-            conf = conf_regression(prob_volume, 4)
+            # conf = conf_regression(prob_volume, 4)
+            conf = None
         else:
             depth, conf = depth_wta(prob_volume, depth_hypo)
 

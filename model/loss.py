@@ -65,8 +65,8 @@ class unsup_loss(nn.Module):
         ref_fea = F.interpolate(ref_fea, size=(H, W), mode='bilinear', align_corners=True)
         ref_fea = ref_fea.permute(0, 2, 3, 1)
         ref_cam = cam_hr[:, 0]
-        smooth_loss = smooth_loss + depth_smoothness(depth_est.unsqueeze(dim=-1), ref_img, 1.0)
-
+        smooth_loss_2 = depth_smoothness(depth_est.unsqueeze(dim=-1), ref_img, 1.0)
+        smooth_loss = smooth_loss_2 + smooth_loss
         for view in range(1, num_views):
             view_cam = cam_hr[:, view]
             # warp view_img to the ref_img using the dmap of the ref_img
@@ -74,17 +74,21 @@ class unsup_loss(nn.Module):
             view_img = F.interpolate(view_img, size=(H, W), mode='bilinear', align_corners=True)
             view_img = view_img.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
             warped_img, mask = inverse_warping(view_img, ref_cam, view_cam, depth_est)
-            recon_loss = compute_reconstr_loss(warped_img, ref_img, mask, simple=False)
+            recon_loss_2 = compute_reconstr_loss(warped_img, ref_img, mask, simple=False)
+            recon_loss = recon_loss_2 + recon_loss
             # warp view_fea to the ref_fea using the dmap of the ref_fea
             view_fea = feature_mr[:, view]
             view_fea = F.interpolate(view_fea, size=(H, W), mode='bilinear', align_corners=True)
             view_fea = view_fea.permute(0, 2, 3, 1)
             warped_fea, mask_fea = inverse_warping(view_fea, ref_cam, view_cam, depth_est)
-            fea_recon_loss = compute_reconstr_loss(warped_fea, ref_fea, mask_fea, simple=False)
+            fea_recon_loss_2 = compute_reconstr_loss(warped_fea, ref_fea, mask_fea, simple=False)
+            fea_recon_loss = fea_recon_loss_2 + fea_recon_loss
             # SSIM loss##
             if view < 3:
-                ssim_loss = ssim_loss + torch.mean(self.ssim(ref_img, warped_img, mask))
-        total_loss = total_loss + (12 * recon_loss + 12 * fea_recon_loss + 6 * ssim_loss + 0.18 * smooth_loss) * 0.5 * stage_idx
+                ssim_loss_2 = torch.mean(self.ssim(ref_img, warped_img, mask))
+                ssim_loss = ssim_loss_2 + ssim_loss
+        total_loss_2 = (12 * recon_loss + 12 * fea_recon_loss + 6 * ssim_loss + 0.18 * smooth_loss) * 0.5 * stage_idx
+        total_loss = total_loss + total_loss_2
 
         return (total_loss,
                 12 * recon_loss,

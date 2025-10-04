@@ -99,7 +99,7 @@ class VGGT4MVS(nn.Module):
     def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair=None):
         # [N] imgs -> [1] ref + [N-1] srcs
         imgs_coarse = imgs["level_2"].squeeze(0)
-        imgs_mid = imgs["level_1"].squeeze(0)
+        imgs_mid = imgs["level_1"]
         imgs_fine = imgs["level_0"][:, 0].squeeze(1)    # ref view [B,N,3,H,W]->[B,3,H,W]
         del imgs
         view_weights = None
@@ -126,9 +126,10 @@ class VGGT4MVS(nn.Module):
 
         # Step 3. Feature Fusion: upscale depth/features + FPNfeatures -> features
         features = []
-        for nview_idx in range(imgs_mid.size()):
+        for nview_idx in range(N):
             img = imgs_mid[:, nview_idx]
             vggt_fea = fea_vggt_fuse[:, nview_idx]
+            print(img.shape)
             fused_feature = self.feature_fusion(img, vggt_fea)
             features.append(fused_feature)
 
