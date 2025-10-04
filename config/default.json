@@ -18,6 +18,6 @@
     "resume": false,
     "summary_freq": 10,
     "save_freq": 1,
-    "seed": 1,
-    "pin_m": false,
+    "seed": 42,
+    "pin_m": false
 }
