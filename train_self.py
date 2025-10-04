@@ -229,9 +229,10 @@ if __name__ == '__main__':
     print("start at epoch {}".format(start_epoch))
     print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
-    if torch.cuda.is_available():
-        print(torch.cuda.device_count(), "GPUs detected!")
-        model = nn.DataParallel(model)
+    # if torch.cuda.is_available():
+    #     print(torch.cuda.device_count(), "GPUs detected!")
+    #     model = nn.DataParallel(model)
+    #     vggt_model = nn.DataParallel(vggt_model)    # TO BE FIXED
 
     # dataset, dataloader
     MVSDataset = find_dataset_def(args.dataset)

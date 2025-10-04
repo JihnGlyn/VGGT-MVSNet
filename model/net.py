@@ -13,7 +13,7 @@ def run_VGGT(model, images, dtype):
 
     with torch.no_grad():
         with torch.cuda.amp.autocast(dtype=dtype):
-            images = images[None]  # add batch dimension
+            # images = images[None]  # add batch dimension
             aggregated_tokens_list, ps_idx = model.aggregator(images)
 
         # Predict Cameras
@@ -98,7 +98,7 @@ class VGGT4MVS(nn.Module):
 
     def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair=None):
         # [N] imgs -> [1] ref + [N-1] srcs
-        imgs_coarse = imgs["level_2"].squeeze(0)
+        imgs_coarse = imgs["level_2"]
         imgs_mid = imgs["level_1"]
         imgs_fine = imgs["level_0"][:, 0].squeeze(1)    # ref view [B,N,3,H,W]->[B,3,H,W]
         del imgs
