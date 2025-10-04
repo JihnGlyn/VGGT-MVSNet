@@ -57,6 +57,7 @@ class DPTHead(nn.Module):
     ) -> None:
         super(DPTHead, self).__init__()
         self.patch_size = patch_size
+        self.output_dim = output_dim
         self.activation = activation
         self.conf_activation = conf_activation
         self.pos_embed = pos_embed
@@ -268,10 +269,10 @@ class DPTHead(nn.Module):
         for i0 in range(0, out.shape[0], mini_batch):
             i1 = min(i0 + mini_batch, out.shape[0])
             out1[i0:i1] = self.scratch.output_conv2(out[i0:i1].float().contiguous())
-        out = out1
+        out_ = out1
         torch.cuda.empty_cache()
 
-        out_ = self.scratch.output_conv2(out)
+        # out_ = self.scratch.output_conv2(out)
         preds, conf = activate_head(out_, activation=self.activation, conf_activation=self.conf_activation)
 
         out = out.view(B, S, *out.shape[1:])
@@ -290,10 +291,12 @@ class DPTHead(nn.Module):
         pos_embed = create_uv_grid(patch_w, patch_h, aspect_ratio=W / H, dtype=x.dtype, device=x.device)
         pos_embed = position_grid_to_embed(pos_embed, x.shape[1])
         pos_embed = pos_embed * ratio
-        pos_embed = pos_embed.permute(2, 0, 1)[None].expand(x.shape[0], -1, -1, -1)
+        pos_embed = pos_embed.permute(2, 0, 1).contiguous()
+        # pos_embed = pos_embed.permute(2, 0, 1)[None].expand(x.shape[0], -1, -1, -1)
         # return x + pos_embed
         for i in range(x.shape[0]):
             x[i] += pos_embed
+        return x
 
     def scratch_forward(self, features: List[torch.Tensor]) -> torch.Tensor:
         """
