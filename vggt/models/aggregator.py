@@ -208,7 +208,6 @@ class Aggregator(nn.Module):
         if self.camera_token.dtype != dtype or self.register_token.dtype != dtype:
             self.camera_token = self.camera_token.to(dtype)
             self.register_token = self.register_token.to(dtype)
-            torch.cuda.empty_cache()
 
         # Normalize images and reshape for patch embed
         images = (images - self._resnet_mean) / self._resnet_std
@@ -271,7 +270,6 @@ class Aggregator(nn.Module):
                 else:
                     raise ValueError(f"Unknown attention type: {attn_type}")
 
-                torch.cuda.empty_cache()
 
             # only these layers are used by prediction heads, all others are unused
             # P.S. camera head only uses layer 23 with patch idx 0
