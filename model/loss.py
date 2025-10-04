@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda")
 
 
 class unsup_loss(nn.Module):
@@ -25,7 +25,7 @@ class unsup_loss(nn.Module):
         stage_idx = 1
 
         for depth_mr in depths_mr:
-            depth_est = depth_mr.unsqueeze(0)
+            depth_est = depth_mr.unsqueeze(1)
             ref_img = imgs_mr[:, 0]  # [B, C, H, W]
             ref_fea = feature_mr[:, 0]
             _, _, H, W = depth_est.shape
@@ -34,6 +34,7 @@ class unsup_loss(nn.Module):
             ref_fea = F.interpolate(ref_fea, size=(H, W), mode='bilinear', align_corners=True)
             ref_fea = ref_fea.permute(0, 2, 3, 1)
             ref_cam = cam_mr[:, 0]
+            print(depth_est.shape, ref_img.shape)
 
             smooth_loss += depth_smoothness(depth_est.unsqueeze(dim=-1), ref_img, 1.0)
             for view in range(1, num_views):

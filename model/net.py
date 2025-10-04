@@ -177,6 +177,7 @@ class VGGT4MVS(nn.Module):
                 output_depths.append(depth_hypo)
 
             # Step 6. Refinement and Upscale: Refinenet -> depth/confidence (high-res)
+            depth_hypo = depth_hypo.unsqueeze(1)    # [B,H,W] -> [B,1,H,W]
             depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
             output_depths.append(depth_refined)
             # {depth:[(iter)*[B,H/2,W/2], [B,1,H,W]], output_projs:[[B,N,2,4,4],[B,N,2,4,4]]}
