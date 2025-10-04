@@ -115,7 +115,7 @@ class VGGT4MVS(nn.Module):
         fea_loss_0 = F.interpolate(fea_loss_, scale_factor=4.0, mode='bilinear', align_corners=False)
         output_feature = {"level_1": fea_loss_1.view(B, N, C, H*2, W*2),
                           "level_0": fea_loss_0.view(B, N, C, H*4, W*4)}
-        depth_min, depth_max = extract_depth_range(vggt_depths, vggt_confs, threshold=5)
+        depth_min, depth_max = extract_depth_range(vggt_depths, vggt_confs, threshold=1)
         
         # Step 2. VGGT to MVS: condition intrinsic/extrinsic -> proj
         proj_matrices = postprocess_cams(intrinsic, extrinsic)
