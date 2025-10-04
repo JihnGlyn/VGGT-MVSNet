@@ -123,24 +123,24 @@ class MVSDataset(Dataset):
         imgs_1 = []
         imgs_2 = []
 
-        # mask = None
+        mask = None
 
         for i, vid in enumerate(view_ids):
             img_filename = os.path.join(self.datapath, 'Rectified/{}_train/rect_{:0>3}_{}_r5000.png'.format(scan, vid + 1, light_idx))
-            # mask_filename = os.path.join(self.datapath, 'Depths_raw/{}/depth_visual_{:0>4}.png'.format(scan, vid))
-            # depth_filename = os.path.join(self.datapath, 'Depths_raw/{}/depth_map_{:0>4}.pfm'.format(scan, vid))
+            mask_filename = os.path.join(self.datapath, 'Depths/{}_train/depth_visual_{:0>4}.png'.format(scan, vid))
+            depth_filename = os.path.join(self.datapath, 'Depths/{}_train/depth_map_{:0>4}.pfm'.format(scan, vid))
 
             imgs = self.read_img(img_filename)
             imgs_0.append(imgs['level_0'])
             imgs_1.append(imgs['level_1'])
             imgs_2.append(imgs['level_2'])
 
-            # if i == 0:  # reference view
-            #     _, mask = self.read_depth_mask(depth_filename, mask_filename, 1)
-            #
-            #     for l in range(self.levels):
-            #         mask[f'level_{l}'] = np.expand_dims(mask[f'level_{l}'], 2)
-            #         mask[f'level_{l}'] = mask[f'level_{l}'].transpose([2, 0, 1])
+            if i == 0:  # reference view
+                _, mask = self.read_depth_mask(depth_filename, mask_filename, 1)
+
+                for l in range(self.levels):
+                    mask[f'level_{l}'] = np.expand_dims(mask[f'level_{l}'], 2)
+                    mask[f'level_{l}'] = mask[f'level_{l}'].transpose([2, 0, 1])
 
         # imgs: N*3*H0*W0, N is number of images
         imgs_0 = np.stack(imgs_0).transpose([0, 3, 1, 2])
@@ -154,5 +154,5 @@ class MVSDataset(Dataset):
 
         # data is numpy array
         return {"imgs": imgs,  # [N, 3, H, W]
-                # "mask": mask    # [1, H, W]
+                "mask": mask    # [1, H, W]
                 }
