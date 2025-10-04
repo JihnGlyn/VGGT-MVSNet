@@ -12,7 +12,7 @@
     "nviews": 5,
     "num_depths": 8,
     "depth_interal_ratio": 0.25,
-    "batch_size": 1,
+    "batch_size": 8,
     "loadckpt": null,
     "logdir": "./checkpoints",
     "resume": false,

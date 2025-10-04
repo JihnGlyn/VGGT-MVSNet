@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from vggt.layers import Mlp
+from vggt.layers import MlpFP32
 from vggt.layers.block import Block
 from vggt.heads.head_act import activate_pose
 
@@ -68,14 +68,29 @@ class CameraHead(nn.Module):
 
         # Adaptive layer normalization without affine parameters.
         self.adaln_norm = nn.LayerNorm(dim_in, elementwise_affine=False, eps=1e-6)
-        self.pose_branch = Mlp(in_features=dim_in, hidden_features=dim_in // 2, out_features=self.target_dim, drop=0)
+        self.pose_branch = MlpFP32(in_features=dim_in, hidden_features=dim_in // 2, out_features=self.target_dim, drop=0)
 
-    def forward(self, aggregated_tokens_list: list, num_iterations: int = 4) -> list:
+    def to(self, *args, **kwargs):
+        self.trunk = self.trunk.to(*args, **kwargs)
+        self.token_norm = self.token_norm.to(*args, **kwargs)
+        self.trunk_norm = self.trunk_norm.to(*args, **kwargs)
+        self.poseLN_modulation = self.poseLN_modulation.to(*args, **kwargs)
+        self.adaln_norm = self.adaln_norm.to(*args, **kwargs)
+        self.pose_branch = self.pose_branch.to(*args, **kwargs)
+
+        # keep these parameters in FP32
+        args, kwargs = MlpFP32.map_to_args_to_float(args, kwargs)
+        self.empty_pose_tokens = nn.Parameter(self.empty_pose_tokens.to(*args, **kwargs))
+        self.embed_pose = self.embed_pose.to(*args, **kwargs)
+
+        return self
+
+    def forward(self, aggregated_tokens_list: dict, num_iterations: int = 4) -> list:
         """
         Forward pass to predict camera parameters.
 
         Args:
-            aggregated_tokens_list (list): List of token tensors from the network;
+            aggregated_tokens_list (dict): Dict of token tensors from the network;
                 the last tensor is used for prediction.
             num_iterations (int, optional): Number of iterative refinement steps. Defaults to 4.
 
@@ -83,10 +98,11 @@ class CameraHead(nn.Module):
             list: A list of predicted camera encodings (post-activation) from each iteration.
         """
         # Use tokens from the last block for camera prediction.
-        tokens = aggregated_tokens_list[-1]
+        num_blocks = 24
+        tokens = aggregated_tokens_list[num_blocks-1]
 
         # Extract the camera tokens
-        pose_tokens = tokens[:, :, 0]
+        pose_tokens = tokens[:, :, 0].to(self.token_norm.weight.dtype)
         pose_tokens = self.token_norm(pose_tokens)
 
         pred_pose_enc_list = self.trunk_fn(pose_tokens, num_iterations)

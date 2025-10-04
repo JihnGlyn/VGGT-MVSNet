@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .head_act import activate_head
+from vggt.layers import MlpFP32
 from .utils import create_uv_grid, position_grid_to_embed
 
 
@@ -111,6 +112,23 @@ class DPTHead(nn.Module):
                 nn.ReLU(inplace=True),
                 nn.Conv2d(head_features_2, output_dim, kernel_size=1, stride=1, padding=0),
             )
+
+    def to(self, *args, **kwargs):
+        self.norm = self.norm.to(*args, **kwargs)
+        self.projects = self.projects.to(*args, **kwargs)
+        self.resize_layers = self.resize_layers.to(*args, **kwargs)
+        for key in ('layer1_rn', 'layer2_rn', 'layer3_rn', 'layer4_rn',
+                    'refinenet1', 'refinenet2', 'refinenet3', 'refinenet4',
+                    'output_conv1'):
+            if not hasattr(self.scratch, key):
+                continue
+            setattr(self.scratch, key, getattr(self.scratch, key).to(*args, **kwargs))
+
+        # keep output_conv2 in FP32
+        args, kwargs = MlpFP32.map_to_args_to_float(args, kwargs)
+        self.scratch.output_conv2 = self.scratch.output_conv2.to(*args, **kwargs)
+
+        return self
 
     def forward(
         self,
@@ -244,6 +262,15 @@ class DPTHead(nn.Module):
         if self.feature_only:
             return out.view(B, S, *out.shape[1:])
 
+        out1 = torch.empty((out.shape[0], self.output_dim, *out.shape[2:]),
+                           dtype=torch.float32, device=out.device).contiguous()
+        mini_batch = 4
+        for i0 in range(0, out.shape[0], mini_batch):
+            i1 = min(i0 + mini_batch, out.shape[0])
+            out1[i0:i1] = self.scratch.output_conv2(out[i0:i1].float().contiguous())
+        out = out1
+        torch.cuda.empty_cache()
+
         out_ = self.scratch.output_conv2(out)
         preds, conf = activate_head(out_, activation=self.activation, conf_activation=self.conf_activation)
 
@@ -264,7 +291,9 @@ class DPTHead(nn.Module):
         pos_embed = position_grid_to_embed(pos_embed, x.shape[1])
         pos_embed = pos_embed * ratio
         pos_embed = pos_embed.permute(2, 0, 1)[None].expand(x.shape[0], -1, -1, -1)
-        return x + pos_embed
+        # return x + pos_embed
+        for i in range(x.shape[0]):
+            x[i] += pos_embed
 
     def scratch_forward(self, features: List[torch.Tensor]) -> torch.Tensor:
         """
@@ -279,21 +308,25 @@ class DPTHead(nn.Module):
         layer_1, layer_2, layer_3, layer_4 = features
 
         layer_1_rn = self.scratch.layer1_rn(layer_1)
+        del layer_1
         layer_2_rn = self.scratch.layer2_rn(layer_2)
+        del layer_2
         layer_3_rn = self.scratch.layer3_rn(layer_3)
+        del layer_3
         layer_4_rn = self.scratch.layer4_rn(layer_4)
+        del layer_4
 
         out = self.scratch.refinenet4(layer_4_rn, size=layer_3_rn.shape[2:])
-        del layer_4_rn, layer_4
+        del layer_4_rn
 
         out = self.scratch.refinenet3(out, layer_3_rn, size=layer_2_rn.shape[2:])
-        del layer_3_rn, layer_3
+        del layer_3_rn
 
         out = self.scratch.refinenet2(out, layer_2_rn, size=layer_1_rn.shape[2:])
-        del layer_2_rn, layer_2
+        del layer_2_rn
 
         out = self.scratch.refinenet1(out, layer_1_rn)
-        del layer_1_rn, layer_1
+        del layer_1_rn
 
         out = self.scratch.output_conv1(out)
         return out

@@ -96,7 +96,7 @@ class VGGT4MVS(nn.Module):
         self.feature_fusion = FeatureFuse(base_channels=16)
         self.refinement = RefineNet(base_channels=8)
 
-    def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair=None):
+    def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair=None, dtype=torch.float32):
         # [N] imgs -> [1] ref + [N-1] srcs
         imgs_coarse = imgs["level_2"]
         imgs_mid = imgs["level_1"]
@@ -106,7 +106,7 @@ class VGGT4MVS(nn.Module):
         output_depths = []
 
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
-        extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_coarse, dtype=torch.float32)
+        extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_coarse, dtype=dtype)
         fea_vggt_fuse, fea_loss = torch.split(fea_vggt, 16, 2)
         vggt_depths_upscaled = F.interpolate(vggt_depths, scale_factor=2.0, mode='bilinear', align_corners=False)
         B, N, C, H, W = fea_loss.shape
@@ -129,7 +129,6 @@ class VGGT4MVS(nn.Module):
         for nview_idx in range(N):
             img = imgs_mid[:, nview_idx]
             vggt_fea = fea_vggt_fuse[:, nview_idx]
-            print(img.shape)
             fused_feature = self.feature_fusion(img, vggt_fea)
             features.append(fused_feature)
 
