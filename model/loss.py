@@ -23,6 +23,7 @@ class unsup_loss(nn.Module):
         feature_mr, feature_hr = features["level_1"], features["level_0"]
         cam_mr, cam_hr = sample_cams["level_1"], sample_cams["level_0"]
         stage_idx = 1
+        loss_weights = [0.8, 1.0, 1.0]
 
         for depth_mr in depths_mr:
             depth_est = depth_mr.unsqueeze(1)
@@ -54,7 +55,7 @@ class unsup_loss(nn.Module):
                 # SSIM loss##
                 if view < 3:
                     ssim_loss += torch.mean(self.ssim(ref_img, warped_img, mask))
-            total_loss += (12 * recon_loss + 12 * fea_recon_loss + 6 * ssim_loss + 0.18 * smooth_loss) * 0.5 * stage_idx
+            total_loss += (10 * recon_loss + 25 * fea_recon_loss + 3 * ssim_loss + 0.18 * smooth_loss) * loss_weights[stage_idx]
             stage_idx += 1
 
         depth_est = depth_hr
@@ -88,13 +89,13 @@ class unsup_loss(nn.Module):
             if view < 3:
                 ssim_loss_2 = torch.mean(self.ssim(ref_img, warped_img, mask))
                 ssim_loss = ssim_loss_2 + ssim_loss
-        total_loss_2 = (12 * recon_loss + 12 * fea_recon_loss + 6 * ssim_loss + 0.18 * smooth_loss) * 0.5 * stage_idx
+        total_loss_2 = (10 * recon_loss + 25 * fea_recon_loss + 3 * ssim_loss + 0.18 * smooth_loss) * loss_weights[stage_idx]
         total_loss = total_loss + total_loss_2
 
         return (total_loss,
-                12 * recon_loss,
-                12 * fea_recon_loss,
-                6 * ssim_loss,
+                10 * recon_loss,
+                25 * fea_recon_loss,
+                3 * ssim_loss,
                 0.18 * smooth_loss)
 
 
