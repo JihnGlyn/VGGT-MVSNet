@@ -46,27 +46,6 @@ def postprocess_cams(intrinsic, extrinsic, scale: float = 2.0):
     return proj
 
 
-def extract_depth_range(depth, conf, threshold):
-    """
-
-    :param depth: [B, N, H, W]
-    :param conf: [B, N, H, W]
-    :param threshold:
-    :return: [B] [B]
-    """
-    mask = conf > threshold
-    depth_masked = torch.where(mask, depth, torch.tensor(float('-inf'), dtype=depth.dtype, device=depth.device))
-    max_depths = torch.max(depth_masked.view(depth.shape[0], -1), dim=1)[0]
-
-    depth_masked = torch.where(mask, depth, torch.tensor(float('inf'), dtype=depth.dtype, device=depth.device))
-    min_depths = torch.min(depth_masked.view(depth.shape[0], -1), dim=1)[0]
-
-    max_depths = torch.where(torch.isinf(max_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device), max_depths)
-    min_depths = torch.where(torch.isinf(min_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device), min_depths)
-
-    return max_depths, min_depths
-
-
 def output_cams_4_loss(intrinsic, extrinsic):
     """
 
@@ -86,6 +65,32 @@ def output_cams_4_loss(intrinsic, extrinsic):
     cam_mat2 = cam_mat1.clone()
     cam_mat2[:, :, 1, :2, :] = cam_mat2[:, :, 1, :2, :] * 2  # high-res
     return {"level_1": cam_mat1, "level_0": cam_mat2}
+
+
+def extract_depth_range(depth, conf, threshold=0.5, widen_threshold=0.1):
+    """
+
+    :param depth: [B, N, H, W]
+    :param conf: [B, N, H, W]
+    :param threshold:
+    :param widen_threshold:
+    :return: [B] [B]
+    """
+    mask = conf > threshold
+    depth_masked = torch.where(mask, depth, torch.tensor(float('-inf'), dtype=depth.dtype, device=depth.device))
+    max_depths = torch.max(depth_masked.view(depth.shape[0], -1), dim=1)[0]
+
+    depth_masked = torch.where(mask, depth, torch.tensor(float('inf'), dtype=depth.dtype, device=depth.device))
+    min_depths = torch.min(depth_masked.view(depth.shape[0], -1), dim=1)[0]
+
+    max_depths = torch.where(torch.isinf(max_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device), max_depths)
+    min_depths = torch.where(torch.isinf(min_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device), min_depths)
+
+    depth_ranges = max_depths - min_depths
+    max_depths += (depth_ranges * widen_threshold)
+    min_depths -= (depth_ranges * widen_threshold).clamp(min=0)
+
+    return max_depths, min_depths
 
 
 class VGGT4MVS(nn.Module):
@@ -167,7 +172,6 @@ class VGGT4MVS(nn.Module):
             for _ in range(iteration):
                 depth_hypo = get_cur_depth_range_samples(depth_hypo, num_depths, depth_interal_ratio)
                 mvsnet_outputs = self.mvs(ref_fea, src_feas, ref_proj, src_projs, depth_hypo, view_weights)
-                depth_interal_ratio *= 0.5
                 view_weights = mvsnet_outputs["view_weights"]
                 depth_hypo = mvsnet_outputs["depth"]
                 output_depths.append(depth_hypo)
