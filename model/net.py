@@ -163,6 +163,7 @@ class VGGT4MVS(nn.Module):
             intrinsic[:, :, :2] *= 4
             # List(N)*[B,1,H,W] List(N)*[B,1,H,W] [B,N,3,3] [B,N,4,4]
             return infer_depths, infer_confs, intrinsic, extrinsic
+
         else:   # TRAIN MODE
             ref_proj, src_projs = proj_mats[0], proj_mats[1:]
             ref_fea, src_feas = features[0], features[1:]
