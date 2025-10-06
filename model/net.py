@@ -28,7 +28,7 @@ def run_VGGT(model, images, dtype):
     last_row = torch.tensor([0, 0, 0, 1], dtype=extrinsic.dtype, device=extrinsic.device).expand(B, N, 1, 4)
     extrinsic = torch.cat((extrinsic, last_row), dim=2)
 
-    # extrinsic[B,N,4,4] intrinsic[B,N,3,3] depth[B,N,H,W] conf[B,N,H,W] feature[B,N,32,H,W]    # TODO: TEST SHAPE
+    # extrinsic[B,N,4,4] intrinsic[B,N,3,3] depth[B,N,H,W] conf[B,N,H,W] feature[B,N,32,H,W]
     return extrinsic, intrinsic, depth_map.squeeze(-1), depth_conf, feature
 
 
@@ -42,7 +42,7 @@ def postprocess_cams(intrinsic, extrinsic, scale: float = 2.0):
     """
     intrinsic[:, :, :2] *= scale    # upscaled image
     proj = extrinsic.clone()
-    proj[:, :, :3, :4] = torch.matmul(intrinsic, extrinsic[:, :, :3, :4])   # TODO: TEST SHAPE
+    proj[:, :, :3, :4] = torch.matmul(intrinsic, extrinsic[:, :, :3, :4])
     return proj
 
 

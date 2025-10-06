@@ -108,6 +108,33 @@ def read_pair_file(filename):
     return data
 
 
+def save_camera_matrices(extrinsics, intrinsic, folder_name='temp_cams'):
+    """
+
+    :param extrinsics: [N, 4, 4]
+    :param intrinsic: [N, 3, 3]
+    :param folder_name:
+    """
+    N = extrinsics.shape[0]
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
+    # cams / {: 0 > 8}_cam.txt
+    for i in range(N):
+        filename = os.path.join(folder_name, "{:0>8}.txt".format(i))
+        with open(filename, 'w') as f:
+            f.write('extrinsic\n')
+            for row in extrinsics[i]:
+                row_str = ' '.join(map(str, row))
+                f.write(row_str + '\n')
+            f.write('\n')
+            f.write('intrinsic\n')
+            for row in intrinsic[i]:
+                row_str = ' '.join(map(str, row))
+                f.write(row_str + '\n')
+
+    print(f"Camera parameters have saved in folder: {folder_name}")
+
+
 # run MVS model to save depth maps
 def save_depth():
     # dataset, dataloader
@@ -164,6 +191,7 @@ def save_depth():
             intrinsics = np.squeeze(intrinsics, 0)
             extrinsics = tensor2numpy(extrinsics)
             extrinsics = np.squeeze(extrinsics, 0)
+            save_camera_matrices(extrinsics, intrinsics)
             del sample_cuda
             print('Iter {}/{}, time = {:.3f}'.format(batch_idx, len(TestImgLoader), time.time() - start_time))
             filenames = sample["filename"]
@@ -183,8 +211,6 @@ def save_depth():
                     confidence = np.squeeze(confidence, 0)
                     save_pfm(confidence_filename, confidence)
                     idx += 1
-
-        return intrinsics, extrinsics
 
 
 # project the reference point cloud into the source view, then project back
@@ -265,7 +291,7 @@ def filter_depth(scan_folder, out_folder, plyfilename, geo_pixel_thres, geo_dept
     for ref_view, src_views in pair_data:
         # load the camera parameters
         ref_intrinsics, ref_extrinsics = read_camera_parameters(
-            os.path.join(scan_folder, 'cams/{:0>8}_cam.txt'.format(ref_view)))
+            os.path.join(scan_folder, 'temp_cams/{:0>8}.txt'.format(ref_view)))
         ref_img, original_h, original_w = read_img(os.path.join(scan_folder, 'images/{:0>8}.jpg'.format(ref_view)),
                                                    img_wh)
         ref_intrinsics[0] *= img_wh[0] / original_w
@@ -285,7 +311,7 @@ def filter_depth(scan_folder, out_folder, plyfilename, geo_pixel_thres, geo_dept
         for src_view in src_views:
             # camera parameters of the source view
             src_intrinsics, src_extrinsics = read_camera_parameters(
-                os.path.join(scan_folder, 'cams/{:0>8}_cam.txt'.format(src_view)))
+                os.path.join(scan_folder, 'temp_cams/{:0>8}.txt'.format(src_view)))
             _, original_h, original_w = read_img(os.path.join(scan_folder, 'images/{:0>8}.jpg'.format(src_view)),
                                                  img_wh)
             src_intrinsics[0] *= img_wh[0] / original_w
