@@ -8,13 +8,13 @@ import random
 
 
 class MVSDataset(Dataset):
-    def __init__(self, datapath, listfile, nviews):
+    def __init__(self, datapath, listfile, nviews, img_wh):
         super(MVSDataset, self).__init__()
         self.datapath = datapath
         self.listfile = listfile
         self.nviews = nviews
-        # self.img_wh = (1600, 1152)
-        self.img_wh = (1600, 1200)
+        self.img_wh = img_wh
+        # self.img_wh = (1600, 1200)
         self.metas = self.build_list()
 
     def build_list(self):
@@ -25,17 +25,18 @@ class MVSDataset(Dataset):
             scans = [line.rstrip() for line in scans]
 
         for scan in scans:
-            pair_file = "Cameras/pair.txt"
+            pair_file = "pair.txt"
 
-            with open(os.path.join(self.datapath, pair_file)) as f:
+            with open(os.path.join(self.datapath, scan, pair_file)) as f:
                 self.num_viewpoint = int(f.readline())
                 # viewpoints (49)
                 for view_idx in range(self.num_viewpoint):
                     ref_view = int(f.readline().rstrip())
                     src_views = [int(x) for x in f.readline().rstrip().split()[1::2]]
                     # light conditions 0-6
-                    for light_idx in range(7):
-                        metas.append((scan, light_idx, ref_view, src_views))
+                    metas.append((scan, ref_view, src_views))
+                    # for light_idx in range(7):
+                    #     metas.append((scan, light_idx, ref_view, src_views))
             folder_metas.append(metas)
 
         print("dataset", "folder_meta:", len(folder_metas))
@@ -54,7 +55,7 @@ class MVSDataset(Dataset):
         np_img_ms = {
             "level_2": cv2.resize(np_img, (w // 4, h // 4), interpolation=cv2.INTER_LINEAR),
             "level_1": cv2.resize(np_img, (w // 2, h // 2), interpolation=cv2.INTER_LINEAR),
-            "level_0": np_img
+            "level_0": cv2.resize(np_img, (w , h), interpolation=cv2.INTER_LINEAR)
         }
         return np_img_ms
 
@@ -65,12 +66,12 @@ class MVSDataset(Dataset):
         imgs_0 = []
         imgs_1 = []
         imgs_2 = []
+        scan= None
         for fid, metas in enumerate(folder_meta):
             # fid: 0-48
-            scan, light_idx, ref_view, src_views = metas
-            if light_idx == 1:
-                pair_views.append(src_views)
-            img_filename = os.path.join(self.datapath, 'Rectified/{}_train/rect_{:0>3}_{}_r5000.png'.format(scan, fid, light_idx))
+            scan, ref_view, src_views = metas
+            pair_views.append(src_views)
+            img_filename = os.path.join(self.datapath, '{}/images/{:0>8}.jpg'.format(scan, fid))
 
             imgs = self.read_img(img_filename)
             imgs_0.append(imgs['level_0'])
@@ -88,6 +89,7 @@ class MVSDataset(Dataset):
 
         # data is numpy array
         return {
-                "imgs": imgs,   # [49, 3, H, W]
-                "pair_views": pair_views,    # [49, 10]
+                "imgs": imgs,   # [B, 49, 3, H, W]
+                "pair_view": pair_views,    # [B, 49, 10]
+                "filename": os.path.join(scan, "{}", "{:0>8}" + "{}"),
         }

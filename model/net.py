@@ -3,7 +3,7 @@ import fontTools.ttLib.tables.O_S_2f_2
 from vggt.models.vggt import VGGT
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
-from mvs import *
+from model.mvs import *
 
 
 def run_VGGT(model, images, dtype):
@@ -100,8 +100,7 @@ class VGGT4MVS(nn.Module):
         # [N] imgs -> [1] ref + [N-1] srcs
         imgs_coarse = imgs["level_2"]
         imgs_mid = imgs["level_1"]
-        imgs_fine = imgs["level_0"][:, 0].squeeze(1)    # ref view [B,N,3,H,W]->[B,3,H,W]
-        del imgs
+        # del imgs
         view_weights = None
         output_depths = []
 
@@ -122,7 +121,6 @@ class VGGT4MVS(nn.Module):
         proj_mats = torch.unbind(proj_matrices, dim=1)
 
         output_projs = output_cams_4_loss(intrinsic, extrinsic)
-        del proj_matrices, intrinsic, extrinsic
 
         # Step 3. Feature Fusion: upscale depth/features + FPNfeatures -> features
         features = []
@@ -139,11 +137,10 @@ class VGGT4MVS(nn.Module):
             infer_depths, infer_confs = [], []
             for i in range(nviews):
                 ref_proj = proj_mats[i]
-                src_projs = [proj_mats[j] for j in pair_unbind[i]]
+                src_projs = [proj_mats[j] for j in pair_unbind[i].squeeze(0)]
                 ref_fea = features[i]
-                src_feas = [features[j] for j in pair_unbind[i]]
-                depth_hypo = vggt_depths_upscaled[i].squeeze(0)  # [B,1,H,W] -> [B,H,W]
-                conf = None
+                src_feas = [features[j] for j in pair_unbind[i].squeeze(0)]
+                depth_hypo = vggt_depths_upscaled[:, i].squeeze(1)  # [B,1,H,W] -> [B,H,W]
 
                 # Step 5. Depth Hypothesis and MVS: MVSNet ->depth/confidence (mid-res)
                 for i in range(iteration):
@@ -152,15 +149,15 @@ class VGGT4MVS(nn.Module):
                     depth_interal_ratio *= 0.5
                     view_weights = mvsnet_outputs["view_weights"]
                     depth_hypo = mvsnet_outputs["depth"]
-                    if i == iteration - 1:
-                        conf = mvsnet_outputs["photometric_confidence"]
-                        conf = F.interpolate(conf, scale_factor=2.0, mode='bilinear', align_corners=False)
                 # Step 6. Refinement and Upscale: Refinenet -> depth/confidence (high-res)
+                imgs_fine = imgs["level_0"][:, i].squeeze(1)  # ref view [B,N,3,H,W]->[B,3,H,W]
                 depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
                 infer_depths.append(depth_refined)
-                infer_confs.append(conf)
-            # List(N)*[B,1,H,W]
-            return infer_depths, infer_confs
+            infer_confs = F.interpolate(vggt_confs, scale_factor=4.0, mode='bilinear', align_corners=False)
+            infer_confs = torch.unbind(infer_confs, dim=1)
+            intrinsic[:, :, :2] *= 4
+            # List(N)*[B,1,H,W] List(N)*[B,1,H,W] [B,N,3,3] [B,N,4,4]
+            return infer_depths, infer_confs, intrinsic, extrinsic
         else:   # TRAIN MODE
             ref_proj, src_projs = proj_mats[0], proj_mats[1:]
             ref_fea, src_feas = features[0], features[1:]
@@ -176,6 +173,7 @@ class VGGT4MVS(nn.Module):
                 output_depths.append(depth_hypo)
 
             # Step 6. Refinement and Upscale: Refinenet -> depth/confidence (high-res)
+            imgs_fine = imgs["level_0"][:, 0].squeeze(1)  # ref view [B,N,3,H,W]->[B,3,H,W]
             depth_hypo = depth_hypo.unsqueeze(1)    # [B,H,W] -> [B,1,H,W]
             depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
             output_depths.append(depth_refined)

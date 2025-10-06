@@ -21,16 +21,16 @@ from PIL import Image
 cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(description='Predict depth, filter, and fuse')
-parser.add_argument('--model', default='IterMVS', help='select model')
-parser.add_argument('--dataset', default='dtu_yao_eval', help='select dataset')
-parser.add_argument('--testpath', help='testing data path')
-parser.add_argument('--testlist', help='testing scan list')
+parser.add_argument('--model', default='VGGT-MVSNet', help='select model')
+parser.add_argument('--dataset', default='dtu_eval', help='select dataset')
+parser.add_argument('--testpath', default='/home/hnu/lxx/dataset/dtu_testing/dtu', help='testing data path')
+parser.add_argument('--testlist', default='./lists/dtu/test1.txt', help='testing scan list')
 parser.add_argument('--split', default='intermediate', help='select data')
 parser.add_argument('--batch_size', type=int, default=1, help='testing batch size')
 parser.add_argument('--n_views', type=int, default=5, help='num of view')
-parser.add_argument('--img_wh', nargs='+', type=int, default=[640, 480],
+parser.add_argument('--img_wh', nargs='+', type=int, default=[1600, 1152],
                     help='height and width of the image')
-parser.add_argument('--loadckpt', default=None, help='load a specific checkpoint')
+parser.add_argument('--loadckpt', default='./checkpoints/model_000003.ckpt', help='load a specific checkpoint')
 parser.add_argument('--outdir', default='./outputs', help='output dir')
 parser.add_argument('--display', action='store_true', help='display depth images and masks')
 
@@ -112,7 +112,7 @@ def read_pair_file(filename):
 def save_depth():
     # dataset, dataloader
     MVSDataset = find_dataset_def(args.dataset)
-    if args.dataset == "dtu_yao_eval":
+    if args.dataset == "dtu_eval":
         test_dataset = MVSDataset(args.testpath, args.testlist, args.n_views, img_wh)
     elif args.dataset == "tanks":
         test_dataset = MVSDataset(args.testpath, args.n_views, img_wh, args.split)
@@ -129,13 +129,13 @@ def save_depth():
 
     # load checkpoint file specified by args.loadckpt
     print("loading model {}".format(args.loadckpt))
-    state_dict = torch.load(args.loadckpt)
-    model.load_state_dict(state_dict['model'])
+    state_dict = torch.load(args.loadckpt, map_location='cuda')["model"]
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
     vggt_model = VGGT()
     LOCAL_MODEL = True
     if LOCAL_MODEL:
-        vggt_model_path = ""
+        vggt_model_path = "./vggtckpt/model.pt"
         vggt_model.load_state_dict(torch.load(vggt_model_path, map_location='cuda'))
     else:
         _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
@@ -149,32 +149,42 @@ def save_depth():
             start_time = time.time()
             sample_cuda = tocuda(sample)
             # TODO:
-            outputs = model(model=vggt_model,
-                            imgs=sample_cuda["imgs"],
-                            num_depths=args.num_depths,
-                            depth_interal_ratio=args.depth_interal_ratio,
-                            iteration=args.iteration,
-                            pair=sample_cuda["pair_view"],
-                            )
+            depth_list, conf_list, intrinsics, extrinsics = model(model=vggt_model,
+                                                                  imgs=sample_cuda["imgs"],
+                                                                  num_depths=args.num_depths,
+                                                                  depth_interal_ratio=args.depth_interal_ratio,
+                                                                  iteration=args.iteration,
+                                                                  pair=sample_cuda["pair_view"],
+                                                                  )
 
-            outputs = tensor2numpy(outputs)
+            depth_list = tensor2numpy(depth_list)
+            conf_list = tensor2numpy(conf_list)
+
+            intrinsics = tensor2numpy(intrinsics)
+            intrinsics = np.squeeze(intrinsics, 0)
+            extrinsics = tensor2numpy(extrinsics)
+            extrinsics = np.squeeze(extrinsics, 0)
             del sample_cuda
             print('Iter {}/{}, time = {:.3f}'.format(batch_idx, len(TestImgLoader), time.time() - start_time))
             filenames = sample["filename"]
 
             # save depth maps and confidence maps
-            for filename, depth_est, confidence in zip(filenames, outputs["depths_upsampled"],
-                                                       outputs["confidence_upsampled"]):
-                depth_filename = os.path.join(args.outdir, filename.format('depth_est', '.pfm'))
-                confidence_filename = os.path.join(args.outdir, filename.format('confidence', '.pfm'))
-                os.makedirs(depth_filename.rsplit('/', 1)[0], exist_ok=True)
-                os.makedirs(confidence_filename.rsplit('/', 1)[0], exist_ok=True)
-                # save depth maps
-                depth_est = np.squeeze(depth_est, 0)
-                save_pfm(depth_filename, depth_est)
-                # save confidence maps
-                confidence = np.squeeze(confidence, 0)
-                save_pfm(confidence_filename, confidence)
+            for filename in filenames:
+                idx = 0
+                for depth_est, confidence in zip(depth_list, conf_list):
+                    depth_filename = os.path.join(args.outdir, filename.format('depth_est', idx, '.pfm'))
+                    confidence_filename = os.path.join(args.outdir, filename.format('confidence', idx, '.pfm'))
+                    os.makedirs(depth_filename.rsplit('/', 1)[0], exist_ok=True)
+                    os.makedirs(confidence_filename.rsplit('/', 1)[0], exist_ok=True)
+                    # save depth maps
+                    depth_est = np.squeeze(np.squeeze(depth_est, 0), 0)
+                    save_pfm(depth_filename, depth_est)
+                    # save confidence maps
+                    confidence = np.squeeze(confidence, 0)
+                    save_pfm(confidence_filename, confidence)
+                    idx += 1
+
+        return intrinsics, extrinsics
 
 
 # project the reference point cloud into the source view, then project back
@@ -255,7 +265,7 @@ def filter_depth(scan_folder, out_folder, plyfilename, geo_pixel_thres, geo_dept
     for ref_view, src_views in pair_data:
         # load the camera parameters
         ref_intrinsics, ref_extrinsics = read_camera_parameters(
-            os.path.join(scan_folder, 'cams_1/{:0>8}_cam.txt'.format(ref_view)))
+            os.path.join(scan_folder, 'cams/{:0>8}_cam.txt'.format(ref_view)))
         ref_img, original_h, original_w = read_img(os.path.join(scan_folder, 'images/{:0>8}.jpg'.format(ref_view)),
                                                    img_wh)
         ref_intrinsics[0] *= img_wh[0] / original_w
@@ -275,7 +285,7 @@ def filter_depth(scan_folder, out_folder, plyfilename, geo_pixel_thres, geo_dept
         for src_view in src_views:
             # camera parameters of the source view
             src_intrinsics, src_extrinsics = read_camera_parameters(
-                os.path.join(scan_folder, 'cams_1/{:0>8}_cam.txt'.format(src_view)))
+                os.path.join(scan_folder, 'cams/{:0>8}_cam.txt'.format(src_view)))
             _, original_h, original_w = read_img(os.path.join(scan_folder, 'images/{:0>8}.jpg'.format(src_view)),
                                                  img_wh)
             src_intrinsics[0] *= img_wh[0] / original_w
@@ -347,8 +357,8 @@ def filter_depth(scan_folder, out_folder, plyfilename, geo_pixel_thres, geo_dept
 
 
 if __name__ == '__main__':
-    # save_depth()
-    if args.dataset == "dtu_yao_eval":
+    save_depth()
+    if args.dataset == "dtu_eval":
         with open(args.testlist) as f:
             scans = f.readlines()
             scans = [line.rstrip() for line in scans]

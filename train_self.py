@@ -51,7 +51,7 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
     for epoch_idx in range(start_epoch, args.epochs):
         print("Epoch {}:".format(epoch_idx + 1))
         global_step = len(TrainImgLoader) * epoch_idx
-
+        print("========== Training !==========")
         for batch_idx, sample in enumerate(TrainImgLoader):
             start_time = time.time()
             global_step = len(TrainImgLoader) * epoch_idx + batch_idx
@@ -62,8 +62,8 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
                 save_scalars(logger, 'train', scalar_outputs, global_step)
                 save_images(logger, 'train', image_outputs, global_step)
                 print(
-                    "Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, train loss:{:.3f}, recon loss:{:.3f}, fea loss:{:.3f}, ssim loss:{:.3f}, smooth loss:{:.3f}, time:{:.3f}".format(
-                        epoch_idx, args.epochs, batch_idx, len(TrainImgLoader),
+                    "Training Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, train loss:{:.3f}, recon:{:.3f}, fea:{:.3f}, ssim:{:.3f}, smooth:{:.3f}, time:{:.3f}".format(
+                        epoch_idx + 1, args.epochs, batch_idx, len(TrainImgLoader),
                         optimizer.param_groups[0]["lr"], loss,
                         scalar_outputs['recon_loss'],
                         scalar_outputs['fea_recon_loss'],
@@ -71,7 +71,7 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
                         scalar_outputs['smooth_loss'],
                         time.time() - start_time))
             del scalar_outputs, image_outputs
-
+        print("========== Testing !==========")
         for batch_idx, sample in enumerate(TestImgLoader):
             start_time = time.time()
             global_step = len(TestImgLoader) * epoch_idx + batch_idx
@@ -81,8 +81,8 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
                 save_scalars(logger, 'test', scalar_outputs, global_step)
                 save_images(logger, 'test', image_outputs, global_step)
                 print(
-                    "Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, test loss:{:.3f}, recon loss:{:.3f}, fea loss:{:.3f}, ssim loss:{:.3f}, smooth loss:{:.3f}, time:{:.3f}".format(
-                        epoch_idx, args.epochs, batch_idx, len(TestImgLoader),
+                    "Testing Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, test loss:{:.3f}, recon:{:.3f}, fea:{:.3f}, ssim:{:.3f}, smooth:{:.3f}, time:{:.3f}".format(
+                        epoch_idx + 1, args.epochs, batch_idx, len(TestImgLoader),
                         optimizer.param_groups[0]["lr"], loss,
                         scalar_outputs['recon_loss'],
                         scalar_outputs['fea_recon_loss'],
@@ -95,7 +95,7 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
         if (epoch_idx + 1) % args.save_freq == 0:
             torch.save({
                 'epoch': epoch_idx,
-                'model': model.module.state_dict(),
+                'model': model.state_dict(),
                 'optimizer': optimizer.state_dict()},
                 "{}/model_{:0>6}.ckpt".format(args.logdir, epoch_idx))
         gc.collect()
