@@ -24,13 +24,13 @@ parser = argparse.ArgumentParser(description='Predict depth, filter, and fuse')
 parser.add_argument('--model', default='VGGT-MVSNet', help='select model')
 parser.add_argument('--dataset', default='dtu_eval', help='select dataset')
 parser.add_argument('--testpath', default='/home/hnu/lxx/dataset/dtu_testing/dtu', help='testing data path')
-parser.add_argument('--testlist', default='./lists/dtu/test1.txt', help='testing scan list')
+parser.add_argument('--testlist', default='./lists/dtu/test.txt', help='testing scan list')
 parser.add_argument('--split', default='intermediate', help='select data')
 parser.add_argument('--batch_size', type=int, default=1, help='testing batch size')
 parser.add_argument('--n_views', type=int, default=5, help='num of view')
 parser.add_argument('--img_wh', nargs='+', type=int, default=[1600, 1152],
                     help='height and width of the image')
-parser.add_argument('--loadckpt', default='./checkpoints/model_000003.ckpt', help='load a specific checkpoint')
+parser.add_argument('--loadckpt', default='./checkpoints/model_000015.ckpt', help='load a specific checkpoint')
 parser.add_argument('--outdir', default='./outputs', help='output dir')
 parser.add_argument('--display', action='store_true', help='display depth images and masks')
 
@@ -40,9 +40,9 @@ parser.add_argument('--depth_interal_ratio', type=float, default=0.25, help='sea
 
 parser.add_argument('--geo_pixel_thres', type=float, default=1,
                     help='pixel threshold for geometric consistency filtering')
-parser.add_argument('--geo_depth_thres', type=float, default=0.01,
+parser.add_argument('--geo_depth_thres', type=float, default=0.1,
                     help='depth threshold for geometric consistency filtering')
-parser.add_argument('--photo_thres', type=float, default=0.3, help='threshold for photometric consistency filtering')
+parser.add_argument('--photo_thres', type=float, default=0.8, help='threshold for photometric consistency filtering')
 
 # parse arguments and check
 args = parser.parse_args()
@@ -108,19 +108,19 @@ def read_pair_file(filename):
     return data
 
 
-def save_camera_matrices(extrinsics, intrinsic, folder_name='temp_cams'):
+def save_camera_matrices(extrinsics, intrinsic, cam_filename):
     """
 
     :param extrinsics: [N, 4, 4]
     :param intrinsic: [N, 3, 3]
-    :param folder_name:
+    :param cam_filename:
     """
     N = extrinsics.shape[0]
-    if not os.path.exists(folder_name):
-        os.makedirs(folder_name)
+    if not os.path.exists(cam_filename):
+        os.makedirs(cam_filename)
     # cams / {: 0 > 8}_cam.txt
     for i in range(N):
-        filename = os.path.join(folder_name, "{:0>8}.txt".format(i))
+        filename = os.path.join(cam_filename, "{:0>8}.txt".format(i))
         with open(filename, 'w') as f:
             f.write('extrinsic\n')
             for row in extrinsics[i]:
@@ -132,7 +132,7 @@ def save_camera_matrices(extrinsics, intrinsic, folder_name='temp_cams'):
                 row_str = ' '.join(map(str, row))
                 f.write(row_str + '\n')
 
-    print(f"Camera parameters have saved in folder: {folder_name}")
+    print(f"Camera parameters have saved in folder: {cam_filename}")
 
 
 # run MVS model to save depth maps
@@ -191,13 +191,14 @@ def save_depth():
             intrinsics = np.squeeze(intrinsics, 0)
             extrinsics = tensor2numpy(extrinsics)
             extrinsics = np.squeeze(extrinsics, 0)
-            save_camera_matrices(extrinsics, intrinsics)
             del sample_cuda
             print('Iter {}/{}, time = {:.3f}'.format(batch_idx, len(TestImgLoader), time.time() - start_time))
             filenames = sample["filename"]
-
+            scannames = sample["scan"]
             # save depth maps and confidence maps
-            for filename in filenames:
+            for filename, scanname in zip(filenames, scannames):
+                cam_filename = os.path.join(args.outdir, scanname, 'cams')
+                save_camera_matrices(extrinsics, intrinsics, cam_filename)
                 idx = 0
                 for depth_est, confidence in zip(depth_list, conf_list):
                     depth_filename = os.path.join(args.outdir, filename.format('depth_est', idx, '.pfm'))
@@ -276,7 +277,7 @@ def check_geometric_consistency(depth_ref, intrinsics_ref, extrinsics_ref, depth
     return mask, depth_reprojected, x2d_src, y2d_src
 
 
-def filter_depth(scan_folder, out_folder, plyfilename, geo_pixel_thres, geo_depth_thres, photo_thres, img_wh,
+def filter_depth(scan_folder, out_folder, scan, plyfilename, geo_pixel_thres, geo_depth_thres, photo_thres, img_wh,
                  geo_mask_thres=3):
     # the pair file
     pair_file = os.path.join(scan_folder, "pair.txt")
@@ -291,17 +292,14 @@ def filter_depth(scan_folder, out_folder, plyfilename, geo_pixel_thres, geo_dept
     for ref_view, src_views in pair_data:
         # load the camera parameters
         ref_intrinsics, ref_extrinsics = read_camera_parameters(
-            os.path.join(scan_folder, 'temp_cams/{:0>8}.txt'.format(ref_view)))
+            os.path.join(out_folder, 'cams/{:0>8}.txt'.format(ref_view)))
         ref_img, original_h, original_w = read_img(os.path.join(scan_folder, 'images/{:0>8}.jpg'.format(ref_view)),
                                                    img_wh)
-        ref_intrinsics[0] *= img_wh[0] / original_w
-        ref_intrinsics[1] *= img_wh[1] / original_h
-        # load the estimated depth of the reference view
         ref_depth_est = read_pfm(os.path.join(out_folder, 'depth_est/{:0>8}.pfm'.format(ref_view)))[0]
-        ref_depth_est = np.squeeze(ref_depth_est, 2)
-        # load the photometric confidence of the reference view
         confidence = read_pfm(os.path.join(out_folder, 'confidence/{:0>8}.pfm'.format(ref_view)))[0]
-        confidence = np.squeeze(confidence, 2)
+        new_h, new_w = ref_depth_est.shape
+        ref_img = cv2.resize(ref_img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
         photo_mask = confidence > photo_thres
 
         all_srcview_depth_ests = []
@@ -311,11 +309,9 @@ def filter_depth(scan_folder, out_folder, plyfilename, geo_pixel_thres, geo_dept
         for src_view in src_views:
             # camera parameters of the source view
             src_intrinsics, src_extrinsics = read_camera_parameters(
-                os.path.join(scan_folder, 'temp_cams/{:0>8}.txt'.format(src_view)))
+                os.path.join(out_folder, 'cams/{:0>8}.txt'.format(src_view)))
             _, original_h, original_w = read_img(os.path.join(scan_folder, 'images/{:0>8}.jpg'.format(src_view)),
                                                  img_wh)
-            src_intrinsics[0] *= img_wh[0] / original_w
-            src_intrinsics[1] *= img_wh[1] / original_h
 
             # the estimated depth of the source view
             src_depth_est = read_pfm(os.path.join(out_folder, 'depth_est/{:0>8}.pfm'.format(src_view)))[0]
@@ -331,6 +327,7 @@ def filter_depth(scan_folder, out_folder, plyfilename, geo_pixel_thres, geo_dept
         depth_est_averaged = (sum(all_srcview_depth_ests) + ref_depth_est) / (geo_mask_sum + 1)
         geo_mask = geo_mask_sum >= geo_mask_thres
         final_mask = np.logical_and(photo_mask, geo_mask)
+        # final_mask = np.logical_and(photo_mask, 1)
 
         os.makedirs(os.path.join(out_folder, "mask"), exist_ok=True)
         save_mask(os.path.join(out_folder, "mask/{:0>8}_photo.png".format(ref_view)), photo_mask)
@@ -393,7 +390,7 @@ if __name__ == '__main__':
             scan_id = int(scan[4:])
             scan_folder = os.path.join(args.testpath, scan)
             out_folder = os.path.join(args.outdir, scan)
-            filter_depth(scan_folder, out_folder, os.path.join(args.outdir, 'vggtmvs{:0>3}_l3.ply'.format(scan_id)),
+            filter_depth(scan_folder, out_folder, scan, os.path.join(args.outdir, 'vggtmvs{:0>3}_l3.ply'.format(scan_id)),
                          args.geo_pixel_thres, args.geo_depth_thres, args.photo_thres, img_wh, 4)
     elif args.dataset == "tanks":
         # intermediate dataset

@@ -22,7 +22,7 @@ class unsup_loss(nn.Module):
         imgs_mr, imgs_hr = imgs["level_1"], imgs["level_0"]
         feature_mr, feature_hr = features["level_1"], features["level_0"]
         cam_mr, cam_hr = sample_cams["level_1"], sample_cams["level_0"]
-        stage_idx = 1
+        stage_idx = 0
         loss_weights = [0.8, 1.0, 1.0]
 
         for depth_mr in depths_mr:
@@ -35,7 +35,6 @@ class unsup_loss(nn.Module):
             ref_fea = F.interpolate(ref_fea, size=(H, W), mode='bilinear', align_corners=True)
             ref_fea = ref_fea.permute(0, 2, 3, 1)
             ref_cam = cam_mr[:, 0]
-            print(depth_est.shape, ref_img.shape)
 
             smooth_loss += depth_smoothness(depth_est.unsqueeze(dim=-1), ref_img, 1.0)
             for view in range(1, num_views):
@@ -55,7 +54,7 @@ class unsup_loss(nn.Module):
                 # SSIM loss##
                 if view < 3:
                     ssim_loss += torch.mean(self.ssim(ref_img, warped_img, mask))
-            total_loss += (10 * recon_loss + 25 * fea_recon_loss + 3 * ssim_loss + 0.18 * smooth_loss) * loss_weights[stage_idx]
+            total_loss += (10 * recon_loss + 60 * fea_recon_loss + 0.5 * ssim_loss + 0.18 * smooth_loss) * loss_weights[stage_idx]
             stage_idx += 1
 
         depth_est = depth_hr
@@ -89,13 +88,13 @@ class unsup_loss(nn.Module):
             if view < 3:
                 ssim_loss_2 = torch.mean(self.ssim(ref_img, warped_img, mask))
                 ssim_loss = ssim_loss_2 + ssim_loss
-        total_loss_2 = (10 * recon_loss + 25 * fea_recon_loss + 3 * ssim_loss + 0.18 * smooth_loss) * loss_weights[stage_idx]
+        total_loss_2 = (10 * recon_loss + 60 * fea_recon_loss + 0.5 * ssim_loss + 0.18 * smooth_loss) * loss_weights[stage_idx]
         total_loss = total_loss + total_loss_2
 
         return (total_loss,
                 10 * recon_loss,
-                25 * fea_recon_loss,
-                3 * ssim_loss,
+                60 * fea_recon_loss,
+                0.5 * ssim_loss,
                 0.18 * smooth_loss)
 
 

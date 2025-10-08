@@ -88,7 +88,7 @@ def extract_depth_range(depth, conf, threshold=0.5, widen_threshold=0.1):
 
     depth_ranges = max_depths - min_depths
     max_depths += (depth_ranges * widen_threshold)
-    min_depths -= (depth_ranges * widen_threshold).clamp(min=0)
+    min_depths -= (depth_ranges * widen_threshold).clamp(min=0.1)
 
     return max_depths, min_depths
 

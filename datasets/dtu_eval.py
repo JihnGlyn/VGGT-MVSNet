@@ -19,14 +19,13 @@ class MVSDataset(Dataset):
 
     def build_list(self):
         folder_metas = []
-        metas = []
         with open(self.listfile) as f:
             scans = f.readlines()
             scans = [line.rstrip() for line in scans]
 
         for scan in scans:
             pair_file = "pair.txt"
-
+            metas = []
             with open(os.path.join(self.datapath, scan, pair_file)) as f:
                 self.num_viewpoint = int(f.readline())
                 # viewpoints (49)
@@ -38,8 +37,8 @@ class MVSDataset(Dataset):
                     # for light_idx in range(7):
                     #     metas.append((scan, light_idx, ref_view, src_views))
             folder_metas.append(metas)
-
-        print("dataset", "folder_meta:", len(folder_metas))
+            print("image nums: ", len(metas))
+        print("total image folders: ", len(folder_metas))
         return folder_metas
 
     def __len__(self):
@@ -55,7 +54,7 @@ class MVSDataset(Dataset):
         np_img_ms = {
             "level_2": cv2.resize(np_img, (w // 4, h // 4), interpolation=cv2.INTER_LINEAR),
             "level_1": cv2.resize(np_img, (w // 2, h // 2), interpolation=cv2.INTER_LINEAR),
-            "level_0": cv2.resize(np_img, (w , h), interpolation=cv2.INTER_LINEAR)
+            "level_0": cv2.resize(np_img, (w, h), interpolation=cv2.INTER_LINEAR)
         }
         return np_img_ms
 
@@ -66,7 +65,6 @@ class MVSDataset(Dataset):
         imgs_0 = []
         imgs_1 = []
         imgs_2 = []
-        scan= None
         for fid, metas in enumerate(folder_meta):
             # fid: 0-48
             scan, ref_view, src_views = metas
@@ -92,4 +90,5 @@ class MVSDataset(Dataset):
                 "imgs": imgs,   # [B, 49, 3, H, W]
                 "pair_view": pair_views,    # [B, 49, 10]
                 "filename": os.path.join(scan, "{}", "{:0>8}" + "{}"),
+                "scan": os.path.join(scan),
         }
