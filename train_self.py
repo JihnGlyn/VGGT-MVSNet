@@ -62,16 +62,16 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
                 save_scalars(logger, 'train', scalar_outputs, global_step)
                 save_images(logger, 'train', image_outputs, global_step)
                 print(
-                    "Training Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, train loss:{:.3f}, recon:{:.3f}, fea:{:.3f}, ssim:{:.3f}, smooth:{:.3f}, time:{:.3f}".format(
+                    "Training Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, train loss:{:.3f}, low:{:.3f}, mid:{:.3f}, high:{:.3f}, time:{:.3f}".format(
                         epoch_idx + 1, args.epochs, batch_idx, len(TrainImgLoader),
                         optimizer.param_groups[0]["lr"], loss,
-                        scalar_outputs['recon_loss'],
-                        scalar_outputs['fea_recon_loss'],
-                        scalar_outputs['ssim_loss'],
-                        scalar_outputs['smooth_loss'],
+                        scalar_outputs["low_res_loss"],
+                        scalar_outputs["mid_res_loss"],
+                        scalar_outputs["high_res_loss"],
                         time.time() - start_time))
             del scalar_outputs, image_outputs
         print("========== Testing !==========")
+        avg_test_scalars = DictAverageMeter()
         for batch_idx, sample in enumerate(TestImgLoader):
             start_time = time.time()
             global_step = len(TestImgLoader) * epoch_idx + batch_idx
@@ -80,22 +80,23 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
             if do_summary:
                 save_scalars(logger, 'test', scalar_outputs, global_step)
                 save_images(logger, 'test', image_outputs, global_step)
+                save_scalars(logger, 'full_test', avg_test_scalars.mean(), global_step)
                 print(
-                    "Testing Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, test loss:{:.3f}, recon:{:.3f}, fea:{:.3f}, ssim:{:.3f}, smooth:{:.3f}, time:{:.3f}".format(
+                    "Testing Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, test loss:{:.3f}, low:{:.3f}, mid:{:.3f}, high:{:.3f}, time:{:.3f}".format(
                         epoch_idx + 1, args.epochs, batch_idx, len(TestImgLoader),
                         optimizer.param_groups[0]["lr"], loss,
-                        scalar_outputs['recon_loss'],
-                        scalar_outputs['fea_recon_loss'],
-                        scalar_outputs['ssim_loss'],
-                        scalar_outputs['smooth_loss'],
+                        scalar_outputs["low_res_loss"],
+                        scalar_outputs["mid_res_loss"],
+                        scalar_outputs["high_res_loss"],
                         time.time() - start_time))
+                avg_test_scalars.update(scalar_outputs)
             del scalar_outputs, image_outputs
 
         # checkpoint
         if (epoch_idx + 1) % args.save_freq == 0:
             torch.save({
                 'epoch': epoch_idx,
-                'model': model.state_dict(),
+                'model_wasted': model.state_dict(),
                 'optimizer': optimizer.state_dict()},
                 "{}/model_{:0>6}.ckpt".format(args.logdir, epoch_idx))
         gc.collect()
@@ -117,19 +118,16 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
                                             iteration=args.iteration,
                                             )
 
-    loss, recon_loss, fea_recon_loss, ssim_loss, smooth_loss = train_loss(depth_est, sample_cuda["imgs"], cams, features)
-
-    if np.isnan(loss.item()):
-        raise NanError
+    loss_list = train_loss(depth_est, sample_cuda["imgs"], cams, features)
+    loss = sum(loss_list)
 
     loss.backward()
     optimizer.step()
 
     scalar_outputs = {"loss": loss,
-                      "recon_loss": recon_loss,
-                      "fea_recon_loss": fea_recon_loss,
-                      "ssim_loss": ssim_loss,
-                      "smooth_loss": smooth_loss,
+                      "low_res_loss": loss_list[0],
+                      "mid_res_loss": loss_list[1],
+                      "high_res_loss": loss_list[2],
                       }
 
     image_outputs = {"depth_1": depth_est[0],
@@ -144,7 +142,7 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
 if __name__ == '__main__':
     # args = myparser.parse_args()
     parser = argparse.ArgumentParser(description='A PyTorch Implementation of VGGT4MVS')
-    parser.add_argument('--device', default='cuda', help='select model')
+    parser.add_argument('--device', default='cuda', help='select model_wasted')
     parser.add_argument('--dataset', default='dtu', help='select dataset')
     parser.add_argument('--trainpath', help='train datapath')
     parser.add_argument('--testpath', help='test datapath')
@@ -162,7 +160,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=1, help='train batch size')
     parser.add_argument('--loadckpt', default=None, help='load a specific checkpoint')
     parser.add_argument('--logdir', default='./checkpoints', help='the directory to save checkpoints/logs')
-    parser.add_argument('--resume', action='store_true', help='continue to train the model')
+    parser.add_argument('--resume', action='store_true', help='continue to train the model_wasted')
     parser.add_argument('--summary_freq', type=int, default=10, help='print and summary frequency')
     parser.add_argument('--save_freq', type=int, default=1, help='save checkpoint frequency')
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed')
@@ -193,7 +191,7 @@ if __name__ == '__main__':
     LOCAL_MODEL = True
     vggt_model = VGGT()
     if LOCAL_MODEL:
-        vggt_model_path = "./vggtckpt/model.pt"    # todo: select path
+        vggt_model_path = "./vggtckpt/model_wasted.pt"    # todo: select path
         vggt_model.load_state_dict(torch.load(vggt_model_path, map_location=device))
     else:
         _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
@@ -217,21 +215,21 @@ if __name__ == '__main__':
         loadckpt = os.path.join(args.logdir, saved_models[-1])
         print("resuming", loadckpt)
         state_dict = torch.load(loadckpt, map_location=torch.device("cpu"))
-        model.load_state_dict(state_dict['model'])
+        model.load_state_dict(state_dict['model_wasted'])
         optimizer.load_state_dict(state_dict['optimizer'])
         start_epoch = state_dict['epoch'] + 1
     elif args.loadckpt:
         # load checkpoint file specified by args.loadckpt
-        print("loading model {}".format(args.loadckpt))
+        print("loading model_wasted {}".format(args.loadckpt))
         state_dict = torch.load(args.loadckpt, map_location=torch.device("cpu"))
-        model.load_state_dict(state_dict['model'])
+        model.load_state_dict(state_dict['model_wasted'])
 
     print("start at epoch {}".format(start_epoch))
-    print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
+    print('Number of model_wasted parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
     # if torch.cuda.is_available():
     #     print(torch.cuda.device_count(), "GPUs detected!")
-    #     model = nn.DataParallel(model)
+    #     model_wasted = nn.DataParallel(model_wasted)
     #     vggt_model = nn.DataParallel(vggt_model)    # TO BE FIXED
 
     # dataset, dataloader

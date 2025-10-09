@@ -21,7 +21,7 @@ from PIL import Image
 cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(description='Predict depth, filter, and fuse')
-parser.add_argument('--model', default='VGGT-MVSNet', help='select model')
+parser.add_argument('--model_wasted', default='VGGT-MVSNet', help='select model_wasted')
 parser.add_argument('--dataset', default='dtu_eval', help='select dataset')
 parser.add_argument('--testpath', default='/home/hnu/lxx/dataset/dtu_testing/dtu', help='testing data path')
 parser.add_argument('--testlist', default='./lists/dtu/test.txt', help='testing scan list')
@@ -135,7 +135,7 @@ def save_camera_matrices(extrinsics, intrinsic, cam_filename):
     print(f"Camera parameters have saved in folder: {cam_filename}")
 
 
-# run MVS model to save depth maps
+# run MVS model_wasted to save depth maps
 def save_depth():
     # dataset, dataloader
     MVSDataset = find_dataset_def(args.dataset)
@@ -149,20 +149,20 @@ def save_depth():
         test_dataset = MVSDataset(args.testpath, args.n_views, img_wh)
     TestImgLoader = DataLoader(test_dataset, args.batch_size, shuffle=False, num_workers=4, drop_last=False)
 
-    # model
+    # model_wasted
     model = VGGT4MVS()
     model = nn.DataParallel(model)
     model.cuda()
 
     # load checkpoint file specified by args.loadckpt
-    print("loading model {}".format(args.loadckpt))
-    state_dict = torch.load(args.loadckpt, map_location='cuda')["model"]
+    print("loading model_wasted {}".format(args.loadckpt))
+    state_dict = torch.load(args.loadckpt, map_location='cuda')["model_wasted"]
     model.load_state_dict(state_dict, strict=False)
     model.eval()
     vggt_model = VGGT()
     LOCAL_MODEL = True
     if LOCAL_MODEL:
-        vggt_model_path = "./vggtckpt/model.pt"
+        vggt_model_path = "./vggtckpt/model_wasted.pt"
         vggt_model.load_state_dict(torch.load(vggt_model_path, map_location='cuda'))
     else:
         _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
@@ -376,7 +376,7 @@ def filter_depth(scan_folder, out_folder, scan, plyfilename, geo_pixel_thres, ge
 
     el = PlyElement.describe(vertex_all, 'vertex')
     PlyData([el]).write(plyfilename)
-    print("saving the final model to", plyfilename)
+    print("saving the final model_wasted to", plyfilename)
 
 
 if __name__ == '__main__':

@@ -33,7 +33,7 @@ class Aggregator(nn.Module):
     The Aggregator applies alternating-attention over input frames,
     as described in VGGT: Visual Geometry Grounded Transformer.
 
-    Remember to set model.train() to enable gradient checkpointing to reduce memory usage.
+    Remember to set model_wasted.train() to enable gradient checkpointing to reduce memory usage.
 
     Args:
         img_size (int): Image size in pixels.

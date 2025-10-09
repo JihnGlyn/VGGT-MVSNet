@@ -154,7 +154,7 @@ def _bilinear_intepolate(x, stride, H, W):
 
 class EfficientUpdateFormer(nn.Module):
     """
-    Transformer model that updates track estimates.
+    Transformer model_wasted that updates track estimates.
     """
 
     def __init__(

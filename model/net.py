@@ -3,7 +3,7 @@ import fontTools.ttLib.tables.O_S_2f_2
 from vggt.models.vggt import VGGT
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
-from .mvs import *
+from model.mvs import *
 
 
 def run_VGGT(model, images, dtype):
@@ -40,7 +40,7 @@ def postprocess_cams(intrinsic, extrinsic, scale: float = 2.0):
     :param scale: scalar
     :return: proj: [B,N,4,4]
     """
-    intrinsic[:, :, :2] *= scale    # upscaled image
+    intrinsic[:, :, :2] *= scale  # upscaled image
     proj = extrinsic.clone()
     proj[:, :, :3, :4] = torch.matmul(intrinsic, extrinsic[:, :, :3, :4])
     return proj
@@ -60,14 +60,15 @@ def output_cams_4_loss(intrinsic, extrinsic):
     cam_mat1 = torch.zeros(B, N, 2, H, W)
     cam_mat1 = cam_mat1.to(device=extrinsic.device)
     cam_mat1[:, :, 0, :4, :4] = extrinsic
-    cam_mat1[:, :, 1, :3, :3] = intrinsic
-    cam_mat1[:, :, 1, :2, :] = cam_mat1[:, :, 1, :2, :] * 2  # mid-res
+    cam_mat1[:, :, 1, :3, :3] = intrinsic  # low-res
     cam_mat2 = cam_mat1.clone()
-    cam_mat2[:, :, 1, :2, :] = cam_mat2[:, :, 1, :2, :] * 2  # high-res
-    return {"level_1": cam_mat1, "level_0": cam_mat2}
+    cam_mat2[:, :, 1, :2, :] = cam_mat2[:, :, 1, :2, :] * 2  # mid-res
+    cam_mat3 = cam_mat2.clone()
+    cam_mat3[:, :, 1, :2, :] = cam_mat3[:, :, 1, :2, :] * 2  # high-res
+    return {"level_l": cam_mat1, "level_m": cam_mat2, "level_h": cam_mat3}
 
 
-def extract_depth_range(depth, conf, threshold=0.5, widen_threshold=0.1):
+def extract_depth_range(depth, conf, threshold=0.9, widen_threshold=0.2):
     """
 
     :param depth: [B, N, H, W]
@@ -83,8 +84,10 @@ def extract_depth_range(depth, conf, threshold=0.5, widen_threshold=0.1):
     depth_masked = torch.where(mask, depth, torch.tensor(float('inf'), dtype=depth.dtype, device=depth.device))
     min_depths = torch.min(depth_masked.view(depth.shape[0], -1), dim=1)[0]
 
-    max_depths = torch.where(torch.isinf(max_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device), max_depths)
-    min_depths = torch.where(torch.isinf(min_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device), min_depths)
+    max_depths = torch.where(torch.isinf(max_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device),
+                             max_depths)
+    min_depths = torch.where(torch.isinf(min_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device),
+                             min_depths)
 
     depth_ranges = max_depths - min_depths
     max_depths += (depth_ranges * widen_threshold)
@@ -97,7 +100,8 @@ class VGGT4MVS(nn.Module):
     def __init__(self, G=8):
         super(VGGT4MVS, self).__init__()
         self.G = G
-        self.mvs = MVSNet(G)
+        self.mvs_lr = MVSNet(G)
+        self.mvs_mr = MVSNet(G)
         self.feature_fusion = FeatureFuse(base_channels=16)
         self.refinement = RefineNet(base_channels=8)
 
@@ -112,76 +116,110 @@ class VGGT4MVS(nn.Module):
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
         extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_coarse, dtype=dtype)
         fea_vggt_fuse, fea_loss = torch.split(fea_vggt, 16, 2)
-        vggt_depths_upscaled = F.interpolate(vggt_depths, scale_factor=2.0, mode='bilinear', align_corners=False)
         B, N, C, H, W = fea_loss.shape
-        fea_loss_ = fea_loss.view(B*N, C, H, W)
+        fea_loss_ = fea_loss.view(B * N, C, H, W)
         fea_loss_1 = F.interpolate(fea_loss_, scale_factor=2.0, mode='bilinear', align_corners=False)
         fea_loss_0 = F.interpolate(fea_loss_, scale_factor=4.0, mode='bilinear', align_corners=False)
-        output_feature = {"level_1": fea_loss_1.view(B, N, C, H*2, W*2),
-                          "level_0": fea_loss_0.view(B, N, C, H*4, W*4)}
-        depth_min, depth_max = extract_depth_range(vggt_depths, vggt_confs, threshold=1)
-        
-        # Step 2. VGGT to MVS: condition intrinsic/extrinsic -> proj
-        proj_matrices = postprocess_cams(intrinsic, extrinsic)
-        proj_mats = torch.unbind(proj_matrices, dim=1)
+        output_feature = {
+            "level_2": fea_loss,
+            "level_1": fea_loss_1.view(B, N, C, H * 2, W * 2),
+            "level_0": fea_loss_0.view(B, N, C, H * 4, W * 4)
+        }
+        depth_min, depth_max = extract_depth_range(vggt_depths, vggt_confs, threshold=1, widen_threshold=0.5)
 
+        # Step 2. VGGT to MVS: condition intrinsic/extrinsic -> proj
+        proj_matrices_lr = postprocess_cams(intrinsic, extrinsic, 1)
+        proj_matrices_mr = postprocess_cams(intrinsic, extrinsic, 2)
+        proj_mats_lr = torch.unbind(proj_matrices_lr, dim=1)
+        proj_mats_mr = torch.unbind(proj_matrices_mr, dim=1)
         output_projs = output_cams_4_loss(intrinsic, extrinsic)
 
-        # Step 3. Feature Fusion: upscale depth/features + FPNfeatures -> features
-        features = []
+        # Step 3. Process Feature: feature_lr: (N)[B,16,H/4,W/4] feature_mr: (N)[B,16,H/2,W/2]
+        features_lr = torch.unbind(fea_vggt_fuse, dim=1)
+        features_mr = []
         for nview_idx in range(N):
             img = imgs_mid[:, nview_idx]
             vggt_fea = fea_vggt_fuse[:, nview_idx]
             fused_feature = self.feature_fusion(img, vggt_fea)
-            features.append(fused_feature)
+            features_mr.append(fused_feature)
 
         # Step 4. Combine ref and src views with pair file
-        if pair is not None:    # EVALUATION MODE
+        if pair is not None:  # EVALUATION MODE
             _, nviews, _ = pair.shape
             pair_unbind = torch.unbind(pair, dim=1)
             infer_depths, infer_confs = [], []
             for i in range(nviews):
-                ref_proj = proj_mats[i]
-                src_projs = [proj_mats[j] for j in pair_unbind[i].squeeze(0)]
-                ref_fea = features[i]
-                src_feas = [features[j] for j in pair_unbind[i].squeeze(0)]
-                depth_hypo = vggt_depths_upscaled[:, i].squeeze(1)  # [B,1,H,W] -> [B,H,W]
+                # TODO: LOW-RES MVS
+                ref_proj = proj_mats_lr[i]
+                src_projs = [proj_mats_lr[j] for j in pair_unbind[i].squeeze(0)]
+                ref_fea = features_lr[i]
+                src_feas = [features_lr[j] for j in pair_unbind[i].squeeze(0)]
 
-                # Step 5. Depth Hypothesis and MVS: MVSNet ->depth/confidence (mid-res)
-                for i in range(iteration):
-                    depth_hypo = get_cur_depth_range_samples(depth_hypo, num_depths, depth_interal_ratio)
-                    mvsnet_outputs = self.mvs(ref_fea, src_feas, ref_proj, src_projs, depth_hypo, view_weights)
-                    depth_interal_ratio *= 0.5
-                    view_weights = mvsnet_outputs["view_weights"]
-                    depth_hypo = mvsnet_outputs["depth"]
-                # Step 6. Refinement and Upscale: Refinenet -> depth/confidence (high-res)
+                depth_hypo = vggt_depths[:, i].squeeze(1)  # [B,1,H,W] -> [B,H,W]
+                depth_hypos = get_cur_depth_range_samples(depth_hypo, 48, 1)
+
+                mvsnet_outputs = self.mvs_lr(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+
+                view_weights, depth_hypo = mvsnet_outputs["view_weights"], mvsnet_outputs["depth"]
+                # infer_depths.append(depth_hypo)
+
+                # TODO: MID-RES MVS
+                ref_proj = proj_mats_mr[i]
+                src_projs = [proj_mats_mr[j] for j in pair_unbind[i].squeeze(0)]
+                ref_fea = features_mr[i]
+                src_feas = [features_mr[j] for j in pair_unbind[i].squeeze(0)]
+
+                depth_hypo = F.interpolate(depth_hypo.unsqueeze(1), scale_factor=2.0, mode='bilinear', align_corners=False)  # [B,1,H,W] -> [B,H,W]
+                depth_hypos = get_cur_depth_range_samples(depth_hypo.squeeze(1), num_depths, depth_interal_ratio)
+
+                view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear', align_corners=False)
+                mvsnet_outputs = self.mvs_mr(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+
+                depth_hypo = mvsnet_outputs["depth"]
+                # infer_depths.append(depth_hypo)
+
+                # TODO: HIGH-RES REFINE
                 imgs_fine = imgs["level_0"][:, i].squeeze(1)  # ref view [B,N,3,H,W]->[B,3,H,W]
                 depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
                 infer_depths.append(depth_refined)
+            # TODO: USING VGGT CONFIDENCE, MAYBE PHOTOMETRIC CONFIDENCE BETTER?
             infer_confs = F.interpolate(vggt_confs, scale_factor=4.0, mode='bilinear', align_corners=False)
             infer_confs = torch.unbind(infer_confs, dim=1)
             intrinsic[:, :, :2] *= 4
             # List(N)*[B,1,H,W] List(N)*[B,1,H,W] [B,N,3,3] [B,N,4,4]
             return infer_depths, infer_confs, intrinsic, extrinsic
 
-        else:   # TRAIN MODE
-            ref_proj, src_projs = proj_mats[0], proj_mats[1:]
-            ref_fea, src_feas = features[0], features[1:]
-            depth_hypo = vggt_depths_upscaled[:, 0].squeeze(1)  # [B,1,H,W] -> [B,H,W]
+        else:  # TRAIN MODE
+            # TODO: LOW-RES MVS
+            ref_proj, src_projs = proj_mats_lr[0], proj_mats_lr[1:]
+            ref_fea, src_feas = features_lr[0], features_lr[1:]
 
-            # Step 5. Depth Hypothesis and MVS: MVSNet ->depth/confidence (mid-res)
-            for _ in range(iteration):
-                depth_hypo = get_cur_depth_range_samples(depth_hypo, num_depths, depth_interal_ratio)
-                mvsnet_outputs = self.mvs(ref_fea, src_feas, ref_proj, src_projs, depth_hypo, view_weights)
-                view_weights = mvsnet_outputs["view_weights"]
-                depth_hypo = mvsnet_outputs["depth"]
-                output_depths.append(depth_hypo)
+            depth_hypo = vggt_depths[:, 0].squeeze(1)  # [B,1,H,W] -> [B,H,W]
+            depth_hypos = get_cur_depth_range_samples(depth_hypo, 48, 1)
 
-            # Step 6. Refinement and Upscale: Refinenet -> depth/confidence (high-res)
+            mvsnet_outputs = self.mvs_lr(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+
+            view_weights, depth_hypo = mvsnet_outputs["view_weights"], mvsnet_outputs["depth"]
+            output_depths.append(depth_hypo.unsqueeze(1))
+
+            # TODO: MID-RES MVS
+            ref_proj, src_projs = proj_mats_mr[0], proj_mats_mr[1:]
+            ref_fea, src_feas = features_mr[0], features_mr[1:]
+
+            depth_hypo = F.interpolate(depth_hypo.unsqueeze(1), scale_factor=2.0, mode='bilinear', align_corners=False)
+            depth_hypos = get_cur_depth_range_samples(depth_hypo.squeeze(1), num_depths, depth_interal_ratio)
+
+            view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear', align_corners=False)
+            mvsnet_outputs = self.mvs_mr(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+
+            depth_hypo = mvsnet_outputs["depth"]
+            output_depths.append(depth_hypo.unsqueeze(1))
+
+            # TODO: HIGH-RES REFINE
             imgs_fine = imgs["level_0"][:, 0].squeeze(1)  # ref view [B,N,3,H,W]->[B,3,H,W]
-            depth_hypo = depth_hypo.unsqueeze(1)    # [B,H,W] -> [B,1,H,W]
+            depth_hypo = depth_hypo.unsqueeze(1)  # [B,H,W] -> [B,1,H,W]
             depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
             output_depths.append(depth_refined)
-            # {depth:[(iter)*[B,H/2,W/2], [B,1,H,W]], output_projs:[[B,N,2,4,4],[B,N,2,4,4]]}
+            # {depth:[[B,1,H/4,W/4], [B,1,H/2,W/2], [B,1,H,W]], output_projs:[[B,N,2,4,4],[B,N,2,4,4]]}
             return output_depths, output_projs, output_feature
 

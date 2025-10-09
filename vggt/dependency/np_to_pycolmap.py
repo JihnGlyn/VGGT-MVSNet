@@ -152,7 +152,7 @@ def pycolmap_to_batch_np_matrix(reconstruction, device="cpu", camera_type="SIMPL
     Args:
         reconstruction (pycolmap.Reconstruction): The reconstruction object from PyCOLMAP.
         device (str): Ignored in NumPy version (kept for API compatibility).
-        camera_type (str): The type of camera model used (default: "SIMPLE_PINHOLE").
+        camera_type (str): The type of camera model_wasted used (default: "SIMPLE_PINHOLE").
 
     Returns:
         tuple: A tuple containing points3D, extrinsics, intrinsics, and optionally extra_params.
@@ -297,7 +297,7 @@ def _build_pycolmap_intri(fidx, intrinsics, camera_type, extra_params=None):
     Args:
         fidx: Frame index
         intrinsics: Camera intrinsic parameters
-        camera_type: Type of camera model
+        camera_type: Type of camera model_wasted
         extra_params: Additional parameters for certain camera types
 
     Returns:

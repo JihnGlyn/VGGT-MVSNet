@@ -10,92 +10,56 @@ class unsup_loss(nn.Module):
         super(unsup_loss, self).__init__()
         self.ssim = SSIM()
 
-    def forward(self, depths, imgs, sample_cams, features, num_views=5):
+    def forward(self, depths, imgs, sample_cams, feas, num_views=5):
+        stage_weights = [10.0, 10.0, 10.0]
+        ls_weights = [10, 80, 0.5, 0.1]
 
-        total_loss = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
-        recon_loss = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
-        fea_recon_loss = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
-        ssim_loss = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
-        smooth_loss = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
+        stage_loss_list = []
 
-        depths_mr, depth_hr = depths[:-1], depths[-1]
-        imgs_mr, imgs_hr = imgs["level_1"], imgs["level_0"]
-        feature_mr, feature_hr = features["level_1"], features["level_0"]
-        cam_mr, cam_hr = sample_cams["level_1"], sample_cams["level_0"]
+        images = [imgs["level_2"], imgs["level_1"], imgs["level_0"]]
+        features = [feas["level_2"], feas["level_1"], feas["level_0"]]
+        cams = [sample_cams["level_l"], sample_cams["level_m"], sample_cams["level_h"]]
+
         stage_idx = 0
-        loss_weights = [0.8, 1.0, 1.0]
+        for depth, image, feature, cam in zip(depths, images, features, cams):
 
-        for depth_mr in depths_mr:
-            depth_est = depth_mr.unsqueeze(1)
-            ref_img = imgs_mr[:, 0]  # [B, C, H, W]
-            ref_fea = feature_mr[:, 0]
-            _, _, H, W = depth_est.shape
+            recon_loss = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
+            fea_recon_loss = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
+            ssim_loss = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
+            smooth_loss = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
+
+            ref_img = image[:, 0]
+            ref_fea = feature[:, 0]
+            _, _, H, W = depth.shape
             ref_img = F.interpolate(ref_img, size=(H, W), mode='bilinear', align_corners=True)
             ref_img = ref_img.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
             ref_fea = F.interpolate(ref_fea, size=(H, W), mode='bilinear', align_corners=True)
             ref_fea = ref_fea.permute(0, 2, 3, 1)
-            ref_cam = cam_mr[:, 0]
-
-            smooth_loss += depth_smoothness(depth_est.unsqueeze(dim=-1), ref_img, 1.0)
+            ref_cam = cam[:, 0]
+            smooth_loss += depth_smoothness(depth.unsqueeze(dim=-1), ref_img, 1.0)
             for view in range(1, num_views):
-                view_cam = cam_mr[:, view]
+                view_cam = cam[:, view]
                 # warp view_img to the ref_img using the dmap of the ref_img
-                view_img = imgs_mr[:, view]
+                view_img = image[:, view]
                 view_img = F.interpolate(view_img, size=(H, W), mode='bilinear', align_corners=True)
                 view_img = view_img.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
-                warped_img, mask = inverse_warping(view_img, ref_cam, view_cam, depth_est)
+                warped_img, mask = inverse_warping(view_img, ref_cam, view_cam, depth)
                 recon_loss = compute_reconstr_loss(warped_img, ref_img, mask, simple=False)
                 # warp view_fea to the ref_fea using the dmap of the ref_fea
-                view_fea = feature_mr[:, view]
+                view_fea = feature[:, view]
                 view_fea = F.interpolate(view_fea, size=(H, W), mode='bilinear', align_corners=True)
                 view_fea = view_fea.permute(0, 2, 3, 1)
-                warped_fea, mask_fea = inverse_warping(view_fea, ref_cam, view_cam, depth_est)
+                warped_fea, mask_fea = inverse_warping(view_fea, ref_cam, view_cam, depth)
                 fea_recon_loss = compute_reconstr_loss(warped_fea, ref_fea, mask_fea, simple=False)
                 # SSIM loss##
                 if view < 3:
                     ssim_loss += torch.mean(self.ssim(ref_img, warped_img, mask))
-            total_loss += (10 * recon_loss + 60 * fea_recon_loss + 0.5 * ssim_loss + 0.18 * smooth_loss) * loss_weights[stage_idx]
+            stage_loss = (ls_weights[0] * recon_loss + ls_weights[1] * fea_recon_loss + ls_weights[2] * ssim_loss
+                          + ls_weights[3] * smooth_loss) * stage_weights[stage_idx]
+            stage_loss_list.append(stage_loss)
             stage_idx += 1
 
-        depth_est = depth_hr
-        ref_img = imgs_hr[:, 0]  # [B, C, H, W]
-        ref_fea = feature_hr[:, 0]
-        _, _, H, W = depth_est.shape
-        ref_img = F.interpolate(ref_img, size=(H, W), mode='bilinear', align_corners=True)
-        ref_img = ref_img.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
-        ref_fea = F.interpolate(ref_fea, size=(H, W), mode='bilinear', align_corners=True)
-        ref_fea = ref_fea.permute(0, 2, 3, 1)
-        ref_cam = cam_hr[:, 0]
-        smooth_loss_2 = depth_smoothness(depth_est.unsqueeze(dim=-1), ref_img, 1.0)
-        smooth_loss = smooth_loss_2 + smooth_loss
-        for view in range(1, num_views):
-            view_cam = cam_hr[:, view]
-            # warp view_img to the ref_img using the dmap of the ref_img
-            view_img = imgs_hr[:, view]
-            view_img = F.interpolate(view_img, size=(H, W), mode='bilinear', align_corners=True)
-            view_img = view_img.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
-            warped_img, mask = inverse_warping(view_img, ref_cam, view_cam, depth_est)
-            recon_loss_2 = compute_reconstr_loss(warped_img, ref_img, mask, simple=False)
-            recon_loss = recon_loss_2 + recon_loss
-            # warp view_fea to the ref_fea using the dmap of the ref_fea
-            view_fea = feature_mr[:, view]
-            view_fea = F.interpolate(view_fea, size=(H, W), mode='bilinear', align_corners=True)
-            view_fea = view_fea.permute(0, 2, 3, 1)
-            warped_fea, mask_fea = inverse_warping(view_fea, ref_cam, view_cam, depth_est)
-            fea_recon_loss_2 = compute_reconstr_loss(warped_fea, ref_fea, mask_fea, simple=False)
-            fea_recon_loss = fea_recon_loss_2 + fea_recon_loss
-            # SSIM loss##
-            if view < 3:
-                ssim_loss_2 = torch.mean(self.ssim(ref_img, warped_img, mask))
-                ssim_loss = ssim_loss_2 + ssim_loss
-        total_loss_2 = (10 * recon_loss + 60 * fea_recon_loss + 0.5 * ssim_loss + 0.18 * smooth_loss) * loss_weights[stage_idx]
-        total_loss = total_loss + total_loss_2
-
-        return (total_loss,
-                10 * recon_loss,
-                60 * fea_recon_loss,
-                0.5 * ssim_loss,
-                0.18 * smooth_loss)
+        return stage_loss_list
 
 
 class SSIM(nn.Module):
