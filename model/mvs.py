@@ -1,5 +1,5 @@
-from modules import *
-from submodules import *
+from .modules import *
+from .submodules import *
 
 
 class PatchmatchNet(nn.Module):

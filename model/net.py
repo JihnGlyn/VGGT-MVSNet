@@ -3,7 +3,7 @@ import fontTools.ttLib.tables.O_S_2f_2
 from vggt.models.vggt import VGGT
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
-from model.mvs import *
+from .mvs import *
 
 
 def run_VGGT(model, images, dtype):
