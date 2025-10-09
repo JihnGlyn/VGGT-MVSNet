@@ -43,8 +43,10 @@ class MVSDataset(Dataset):
                     ref_view = int(f.readline().rstrip())
                     src_views = [int(x) for x in f.readline().rstrip().split()[1::2]]
                     # light conditions 0-6
-                    for light_idx in range(7):
-                        metas.append((scan, light_idx, ref_view, src_views))
+                    light_idx = random.randint(0, 6)
+                    metas.append((scan, light_idx, ref_view, src_views))
+                    # for light_idx in range(7):
+                    #     metas.append((scan, light_idx, ref_view, src_views))
         print("dataset", self.mode, "metas:", len(metas))
         return metas
 
@@ -59,7 +61,8 @@ class MVSDataset(Dataset):
         np_img = 2 * np.array(img, dtype=np.float32) / 255. - 1
         h, w, _ = np_img.shape
 
-        new_h, new_w = (h // 56) * 56, (w // 56) * 56
+        # new_h, new_w = (h // 56) * 56, (w // 56) * 56
+        new_h, new_w = (h // 112) * 112, (w // 112) * 112
         np_img_ms = {
             "level_2": cv2.resize(np_img, (new_w // 4, new_h // 4), interpolation=cv2.INTER_LINEAR),
             "level_1": cv2.resize(np_img, (new_w // 2, new_h // 2), interpolation=cv2.INTER_LINEAR),
@@ -70,8 +73,8 @@ class MVSDataset(Dataset):
     def prepare_img(self, hr_img):
         # downsample
         h, w = hr_img.shape
-        new_h, new_w = (h // 56) * 56, (w // 56) * 56
-        # original w,h: 1600, 1200; downsample -> 800, 600 ; crop -> 640, 512
+        # new_h, new_w = (h // 56) * 56, (w // 56) * 56
+        new_h, new_w = (h // 112) * 112, (w // 112) * 112
         hr_img = cv2.resize(hr_img, (new_w // 2, new_h // 2), interpolation=cv2.INTER_NEAREST)
         # crop
         h, w = hr_img.shape
