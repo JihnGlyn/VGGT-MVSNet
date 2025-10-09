@@ -143,7 +143,7 @@ class VGGT4MVS(nn.Module):
             fused_feature = self.feature_fusion(img, vggt_fea)
             features_mr.append(fused_feature)
 
-        # Step 4. Combine ref and src views with pair file
+        # Step 4. Combine ref and src views with pair file then process MVSNet
         if pair is not None:  # EVALUATION MODE
             _, nviews, _ = pair.shape
             pair_unbind = torch.unbind(pair, dim=1)

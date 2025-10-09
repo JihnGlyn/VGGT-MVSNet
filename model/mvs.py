@@ -83,7 +83,7 @@ class MVSNet(nn.Module):
         """
         # TODO: step 1. feature map homographic warping and cost volume construction
         _, D, H, W = depth_hypo.shape
-        B, C = ref_fea.shape[0],ref_fea.shape[1]
+        B, C = ref_fea.shape[0], ref_fea.shape[1]
         view_weights_list = []
 
         similarity_sum = 0
@@ -118,7 +118,7 @@ class MVSNet(nn.Module):
 
         if not wta:
             depth = depth_regression(prob_volume, depth_hypo)
-            # conf = conf_regression(prob_volume, 4)
+            conf = conf_regression(prob_volume, 4)
             conf = None
         else:
             depth, conf = depth_wta(prob_volume, depth_hypo)

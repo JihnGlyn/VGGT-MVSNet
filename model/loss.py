@@ -12,9 +12,10 @@ class unsup_loss(nn.Module):
 
     def forward(self, depths, imgs, sample_cams, feas, num_views=5):
         stage_weights = [10.0, 10.0, 10.0]
-        ls_weights = [10, 80, 0.5, 0.1]
+        ls_weights = [10, 80, 4.0, 0.1]
 
         stage_loss_list = []
+        ssim_loss_total = torch.tensor(0.0, dtype=torch.float32, device=device, requires_grad=False)
 
         images = [imgs["level_2"], imgs["level_1"], imgs["level_0"]]
         features = [feas["level_2"], feas["level_1"], feas["level_0"]]
@@ -51,15 +52,16 @@ class unsup_loss(nn.Module):
                 view_fea = view_fea.permute(0, 2, 3, 1)
                 warped_fea, mask_fea = inverse_warping(view_fea, ref_cam, view_cam, depth)
                 fea_recon_loss = compute_reconstr_loss(warped_fea, ref_fea, mask_fea, simple=False)
-                # SSIM loss##
+                # SSIM loss #
                 if view < 3:
                     ssim_loss += torch.mean(self.ssim(ref_img, warped_img, mask))
             stage_loss = (ls_weights[0] * recon_loss + ls_weights[1] * fea_recon_loss + ls_weights[2] * ssim_loss
                           + ls_weights[3] * smooth_loss) * stage_weights[stage_idx]
+            ssim_loss_total += ls_weights[2] * ssim_loss * stage_weights[stage_idx]
             stage_loss_list.append(stage_loss)
             stage_idx += 1
 
-        return stage_loss_list
+        return stage_loss_list, ssim_loss_total
 
 
 class SSIM(nn.Module):
