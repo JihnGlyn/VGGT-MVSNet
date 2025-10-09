@@ -21,17 +21,17 @@ from PIL import Image
 cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(description='Predict depth, filter, and fuse')
-parser.add_argument('--model_wasted', default='VGGT-MVSNet', help='select model_wasted')
+parser.add_argument('--model', default='VGGT-MVSNet', help='select model')
 parser.add_argument('--dataset', default='dtu_eval', help='select dataset')
 parser.add_argument('--testpath', default='/home/hnu/lxx/dataset/dtu_testing/dtu', help='testing data path')
-parser.add_argument('--testlist', default='./lists/dtu/test.txt', help='testing scan list')
+parser.add_argument('--testlist', default='./lists/dtu/test1.txt', help='testing scan list')
 parser.add_argument('--split', default='intermediate', help='select data')
 parser.add_argument('--batch_size', type=int, default=1, help='testing batch size')
 parser.add_argument('--n_views', type=int, default=5, help='num of view')
 parser.add_argument('--img_wh', nargs='+', type=int, default=[1600, 1152],
                     help='height and width of the image')
 parser.add_argument('--loadckpt', default='./checkpoints/model_000015.ckpt', help='load a specific checkpoint')
-parser.add_argument('--outdir', default='./outputs', help='output dir')
+parser.add_argument('--outdir', default='./outputs_vggt', help='output dir')
 parser.add_argument('--display', action='store_true', help='display depth images and masks')
 
 parser.add_argument('--iteration', type=int, default=2, help='num of iteration')
@@ -40,9 +40,9 @@ parser.add_argument('--depth_interal_ratio', type=float, default=0.25, help='sea
 
 parser.add_argument('--geo_pixel_thres', type=float, default=1,
                     help='pixel threshold for geometric consistency filtering')
-parser.add_argument('--geo_depth_thres', type=float, default=0.1,
+parser.add_argument('--geo_depth_thres', type=float, default=0.01,
                     help='depth threshold for geometric consistency filtering')
-parser.add_argument('--photo_thres', type=float, default=0.8, help='threshold for photometric consistency filtering')
+parser.add_argument('--photo_thres', type=float, default=2.0, help='threshold for photometric consistency filtering')
 
 # parse arguments and check
 args = parser.parse_args()
@@ -135,7 +135,7 @@ def save_camera_matrices(extrinsics, intrinsic, cam_filename):
     print(f"Camera parameters have saved in folder: {cam_filename}")
 
 
-# run MVS model_wasted to save depth maps
+# run MVS model to save depth maps
 def save_depth():
     # dataset, dataloader
     MVSDataset = find_dataset_def(args.dataset)
@@ -149,20 +149,20 @@ def save_depth():
         test_dataset = MVSDataset(args.testpath, args.n_views, img_wh)
     TestImgLoader = DataLoader(test_dataset, args.batch_size, shuffle=False, num_workers=4, drop_last=False)
 
-    # model_wasted
+    # model
     model = VGGT4MVS()
     model = nn.DataParallel(model)
     model.cuda()
 
     # load checkpoint file specified by args.loadckpt
-    print("loading model_wasted {}".format(args.loadckpt))
-    state_dict = torch.load(args.loadckpt, map_location='cuda')["model_wasted"]
+    print("loading model {}".format(args.loadckpt))
+    state_dict = torch.load(args.loadckpt, map_location='cuda')["model"]
     model.load_state_dict(state_dict, strict=False)
     model.eval()
     vggt_model = VGGT()
     LOCAL_MODEL = True
     if LOCAL_MODEL:
-        vggt_model_path = "./vggtckpt/model_wasted.pt"
+        vggt_model_path = "./vggtckpt/model.pt"
         vggt_model.load_state_dict(torch.load(vggt_model_path, map_location='cuda'))
     else:
         _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
@@ -206,7 +206,7 @@ def save_depth():
                     os.makedirs(depth_filename.rsplit('/', 1)[0], exist_ok=True)
                     os.makedirs(confidence_filename.rsplit('/', 1)[0], exist_ok=True)
                     # save depth maps
-                    depth_est = np.squeeze(np.squeeze(depth_est, 0), 0)
+                    depth_est = np.squeeze(depth_est, 0)
                     save_pfm(depth_filename, depth_est)
                     # save confidence maps
                     confidence = np.squeeze(confidence, 0)
@@ -326,8 +326,8 @@ def filter_depth(scan_folder, out_folder, scan, plyfilename, geo_pixel_thres, ge
 
         depth_est_averaged = (sum(all_srcview_depth_ests) + ref_depth_est) / (geo_mask_sum + 1)
         geo_mask = geo_mask_sum >= geo_mask_thres
-        final_mask = np.logical_and(photo_mask, geo_mask)
-        # final_mask = np.logical_and(photo_mask, 1)
+        # final_mask = np.logical_and(photo_mask, geo_mask)
+        final_mask = np.logical_and(photo_mask, 1)
 
         os.makedirs(os.path.join(out_folder, "mask"), exist_ok=True)
         save_mask(os.path.join(out_folder, "mask/{:0>8}_photo.png".format(ref_view)), photo_mask)
@@ -376,7 +376,7 @@ def filter_depth(scan_folder, out_folder, scan, plyfilename, geo_pixel_thres, ge
 
     el = PlyElement.describe(vertex_all, 'vertex')
     PlyData([el]).write(plyfilename)
-    print("saving the final model_wasted to", plyfilename)
+    print("saving the final model to", plyfilename)
 
 
 if __name__ == '__main__':

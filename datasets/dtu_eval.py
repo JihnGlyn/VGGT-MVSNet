@@ -37,8 +37,8 @@ class MVSDataset(Dataset):
                     # for light_idx in range(7):
                     #     metas.append((scan, light_idx, ref_view, src_views))
             folder_metas.append(metas)
-            print("image nums: ", len(metas))
-        print("total image folders: ", len(folder_metas))
+            print("dataset", len(metas))
+        print("folder_meta:", len(folder_metas))
         return folder_metas
 
     def __len__(self):

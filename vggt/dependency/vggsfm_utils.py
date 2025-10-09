@@ -31,10 +31,10 @@ def build_vggsfm_tracker(model_path=None):
     Build and initialize the VGGSfM tracker.
 
     Args:
-        model_path: Path to the model_wasted weights file. If None, weights are downloaded from HuggingFace.
+        model_path: Path to the model weights file. If None, weights are downloaded from HuggingFace.
 
     Returns:
-        Initialized tracker model_wasted in eval mode.
+        Initialized tracker model in eval mode.
     """
     tracker = TrackerPredictor()
 
@@ -58,8 +58,8 @@ def generate_rank_by_dino(
         images: Tensor of shape (S, 3, H, W) with values in range [0, 1]
         query_frame_num: Number of frames to select
         image_size: Size to resize images to before processing
-        model_name: Name of the DINO model_wasted to use
-        device: Device to run the model_wasted on
+        model_name: Name of the DINO model to use
+        device: Device to run the model on
         spatial_similarity: Whether to use spatial token similarity or CLS token similarity
 
     Returns:
@@ -68,7 +68,7 @@ def generate_rank_by_dino(
     # Resize images to the target size
     images = F.interpolate(images, (image_size, image_size), mode="bilinear", align_corners=False)
 
-    # Load DINO model_wasted
+    # Load DINO model
     dino_v2_model = torch.hub.load("facebookresearch/dinov2", model_name)
     dino_v2_model.eval()
     dino_v2_model = dino_v2_model.to(device)

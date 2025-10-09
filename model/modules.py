@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from submodules import *
+from model.submodules import *
 
 
 class FeatureFuse(nn.Module):

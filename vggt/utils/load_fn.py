@@ -96,8 +96,8 @@ def load_and_preprocess_images_square(image_path_list, target_size=1024):
 
 def load_and_preprocess_images(image_path_list, mode="crop"):
     """
-    A quick start function to load and preprocess images for model_wasted input.
-    This assumes the images should have the same shape for easier batching, but our model_wasted can also work well with different shapes.
+    A quick start function to load and preprocess images for model input.
+    This assumes the images should have the same shape for easier batching, but our model can also work well with different shapes.
 
     Args:
         image_path_list (list): List of paths to image files
@@ -119,7 +119,7 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
           and height is center-cropped if larger than 518px
         - When mode="pad": The function ensures the largest dimension is 518px while maintaining aspect ratio
           and the smaller dimension is padded to reach a square shape (518x518)
-        - Dimensions are adjusted to be divisible by 14 for compatibility with model_wasted requirements
+        - Dimensions are adjusted to be divisible by 14 for compatibility with model requirements
     """
     # Check for empty list
     if len(image_path_list) == 0:
@@ -194,7 +194,7 @@ def load_and_preprocess_images(image_path_list, mode="crop"):
         images.append(img)
 
     # Check if we have different shapes
-    # In theory our model_wasted can also work well with different shapes
+    # In theory our model can also work well with different shapes
     if len(shapes) > 1:
         print(f"Warning: Found images with different shapes: {shapes}")
         # Find maximum dimensions

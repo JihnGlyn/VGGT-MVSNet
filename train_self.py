@@ -96,7 +96,7 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
         if (epoch_idx + 1) % args.save_freq == 0:
             torch.save({
                 'epoch': epoch_idx,
-                'model_wasted': model.state_dict(),
+                'model': model.state_dict(),
                 'optimizer': optimizer.state_dict()},
                 "{}/model_{:0>6}.ckpt".format(args.logdir, epoch_idx))
         gc.collect()
@@ -142,7 +142,7 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
 if __name__ == '__main__':
     # args = myparser.parse_args()
     parser = argparse.ArgumentParser(description='A PyTorch Implementation of VGGT4MVS')
-    parser.add_argument('--device', default='cuda', help='select model_wasted')
+    parser.add_argument('--device', default='cuda', help='select model')
     parser.add_argument('--dataset', default='dtu', help='select dataset')
     parser.add_argument('--trainpath', help='train datapath')
     parser.add_argument('--testpath', help='test datapath')
@@ -160,7 +160,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=1, help='train batch size')
     parser.add_argument('--loadckpt', default=None, help='load a specific checkpoint')
     parser.add_argument('--logdir', default='./checkpoints', help='the directory to save checkpoints/logs')
-    parser.add_argument('--resume', action='store_true', help='continue to train the model_wasted')
+    parser.add_argument('--resume', action='store_true', help='continue to train the model')
     parser.add_argument('--summary_freq', type=int, default=10, help='print and summary frequency')
     parser.add_argument('--save_freq', type=int, default=1, help='save checkpoint frequency')
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed')
@@ -191,7 +191,7 @@ if __name__ == '__main__':
     LOCAL_MODEL = True
     vggt_model = VGGT()
     if LOCAL_MODEL:
-        vggt_model_path = "./vggtckpt/model_wasted.pt"    # todo: select path
+        vggt_model_path = "./vggtckpt/model.pt"    # todo: select path
         vggt_model.load_state_dict(torch.load(vggt_model_path, map_location=device))
     else:
         _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
@@ -215,21 +215,21 @@ if __name__ == '__main__':
         loadckpt = os.path.join(args.logdir, saved_models[-1])
         print("resuming", loadckpt)
         state_dict = torch.load(loadckpt, map_location=torch.device("cpu"))
-        model.load_state_dict(state_dict['model_wasted'])
+        model.load_state_dict(state_dict['model'])
         optimizer.load_state_dict(state_dict['optimizer'])
         start_epoch = state_dict['epoch'] + 1
     elif args.loadckpt:
         # load checkpoint file specified by args.loadckpt
-        print("loading model_wasted {}".format(args.loadckpt))
+        print("loading model {}".format(args.loadckpt))
         state_dict = torch.load(args.loadckpt, map_location=torch.device("cpu"))
-        model.load_state_dict(state_dict['model_wasted'])
+        model.load_state_dict(state_dict['model'])
 
     print("start at epoch {}".format(start_epoch))
-    print('Number of model_wasted parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
+    print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
     # if torch.cuda.is_available():
     #     print(torch.cuda.device_count(), "GPUs detected!")
-    #     model_wasted = nn.DataParallel(model_wasted)
+    #     model = nn.DataParallel(model)
     #     vggt_model = nn.DataParallel(vggt_model)    # TO BE FIXED
 
     # dataset, dataloader

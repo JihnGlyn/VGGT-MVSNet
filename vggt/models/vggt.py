@@ -6,7 +6,7 @@
 
 import torch
 import torch.nn as nn
-from huggingface_hub import PyTorchModelHubMixin  # used for model_wasted hub
+from huggingface_hub import PyTorchModelHubMixin  # used for model hub
 
 from vggt.models.aggregator import Aggregator
 from vggt.heads.camera_head import CameraHead
@@ -28,7 +28,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
 
     def forward(self, images: torch.Tensor, query_points: torch.Tensor = None):
         """
-        Forward pass of the VGGT model_wasted.
+        Forward pass of the VGGT model.
 
         Args:
             images (torch.Tensor): Input images with shape [S, 3, H, W] or [B, S, 3, H, W], in range [0, 1].

@@ -42,7 +42,7 @@ class BaseTrackerPredictor(nn.Module):
         self.transformer_dim = self.corr_levels * (self.corr_radius * 2 + 1) ** 2 + self.latent_dim * 2
 
         if self.fine:
-            # TODO this is the old dummy code, will remove this when we train next model_wasted
+            # TODO this is the old dummy code, will remove this when we train next model
             self.transformer_dim += 4 if self.transformer_dim % 2 == 0 else 5
         else:
             self.transformer_dim += (4 - self.transformer_dim % 4) % 4

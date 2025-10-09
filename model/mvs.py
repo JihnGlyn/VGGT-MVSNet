@@ -1,5 +1,5 @@
-from modules import *
-from submodules import *
+from model.modules import *
+from model.submodules import *
 
 
 class PatchmatchNet(nn.Module):
@@ -82,13 +82,12 @@ class MVSNet(nn.Module):
         :return: {depth: [B, H, W], conf: [B, H, W], view_weights: [B, N-1, H, W]}
         """
         # TODO: step 1. feature map homographic warping and cost volume construction
-        B, D, H, W = depth_hypo.shape
-        C = ref_fea.shape[1]
+        _, D, H, W = depth_hypo.shape
+        B, C = ref_fea.shape[0],ref_fea.shape[1]
         view_weights_list = []
 
         similarity_sum = 0
         pixel_wise_weight_sum = 1e-8
-
         ref_volume = ref_fea.view(B, self.G, C // self.G, 1, H, W)
         for i, (src_fea, src_proj) in enumerate(zip(src_feas, src_projs)):
             # [B, C, D, H, W] -> [B, G, C/G, D, H, W]
