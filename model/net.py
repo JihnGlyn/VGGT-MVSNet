@@ -40,9 +40,10 @@ def postprocess_cams(intrinsic, extrinsic, scale: float = 2.0):
     :param scale: scalar
     :return: proj: [B,N,4,4]
     """
-    intrinsic[:, :, :2] *= scale  # upscaled image
+    up_intri = intrinsic.clone()
+    up_intri[:, :, :2] *= scale
     proj = extrinsic.clone()
-    proj[:, :, :3, :4] = torch.matmul(intrinsic, extrinsic[:, :, :3, :4])
+    proj[:, :, :3, :4] = torch.matmul(up_intri, extrinsic[:, :, :3, :4])
     return proj
 
 
@@ -185,9 +186,9 @@ class VGGT4MVS(nn.Module):
             # TODO: USING VGGT CONFIDENCE, MAYBE PHOTOMETRIC CONFIDENCE BETTER?
             infer_confs = F.interpolate(vggt_confs, scale_factor=4.0, mode='bilinear', align_corners=False)
             infer_confs = torch.unbind(infer_confs, dim=1)
-            intrinsic[:, :, :2] *= 4
+            out_intr = intrinsic[:, :, :2] * 4
             # List(N)*[B,1,H,W] List(N)*[B,1,H,W] [B,N,3,3] [B,N,4,4]
-            return infer_depths, infer_confs, intrinsic, extrinsic
+            return infer_depths, infer_confs, out_intr, extrinsic
 
         else:  # TRAIN MODE
             # TODO: LOW-RES MVS
@@ -206,7 +207,8 @@ class VGGT4MVS(nn.Module):
             ref_proj, src_projs = proj_mats_mr[0], proj_mats_mr[1:]
             ref_fea, src_feas = features_mr[0], features_mr[1:]
 
-            depth_hypo = F.interpolate(depth_hypo.unsqueeze(1), scale_factor=2.0, mode='bilinear', align_corners=False)
+            depth_sample = depth_hypo.detach()
+            depth_hypo = F.interpolate(depth_sample.unsqueeze(1), scale_factor=2.0, mode='bilinear', align_corners=False)
             depth_hypos = get_cur_depth_range_samples(depth_hypo.squeeze(1), num_depths, depth_interal_ratio)
 
             view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear', align_corners=False)
@@ -217,7 +219,8 @@ class VGGT4MVS(nn.Module):
 
             # TODO: HIGH-RES REFINE
             imgs_fine = imgs["level_0"][:, 0].squeeze(1)  # ref view [B,N,3,H,W]->[B,3,H,W]
-            depth_hypo = depth_hypo.unsqueeze(1)  # [B,H,W] -> [B,1,H,W]
+            depth_sample = depth_hypo.detach()
+            depth_hypo = depth_sample.unsqueeze(1)  # [B,H,W] -> [B,1,H,W]
             depth_refined = self.refinement(imgs_fine, depth_hypo, depth_min, depth_max)
             output_depths.append(depth_refined)
             # {depth:[[B,1,H/4,W/4], [B,1,H/2,W/2], [B,1,H,W]], output_projs:[[B,N,2,4,4],[B,N,2,4,4]]}
