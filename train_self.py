@@ -113,31 +113,34 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
 
     sample_cuda = tocuda(sample)
 
-    depth_est, cams, features = train_model(model=vggt_model,
-                                            imgs=sample_cuda["imgs"],
-                                            num_depths=args.num_depths,
-                                            depth_interal_ratio=args.depth_interal_ratio,
-                                            iteration=args.iteration,
-                                            )
+    depth_est, cams, features, masks = train_model(model=vggt_model,
+                                                   imgs=sample_cuda["imgs"],
+                                                   num_depths=args.num_depths,
+                                                   depth_interal_ratio=args.depth_interal_ratio,
+                                                   iteration=args.iteration,
+                                                   )
 
-    loss_list, ssim_loss = train_loss(depth_est, sample_cuda["imgs"], cams, features)
-    loss = sum(loss_list)
+    loss, ssim, mse, l, m, h = train_loss(sample_cuda["imgs"], features, cams, depth_est, masks)
 
     loss.backward()
     optimizer.step()
 
     scalar_outputs = {
-        "low_res_loss": loss_list[0],
-        "mid_res_loss": loss_list[1],
-        "high_res_loss": loss_list[2],
-        'ssim_loss': ssim_loss
+        "loss": loss,
+        "low_res_loss": l,
+        "mid_res_loss": m,
+        "high_res_loss": h,
+        'ssim_loss': ssim,
+        'mse_loss': mse,
     }
 
     image_outputs = {
         "depth_1": depth_est[0],
         "depth_2": depth_est[1],
         "depth_3": depth_est[2],
+        "vggt_depth": depth_est[3],
         "ref_img": sample["imgs"]["level_1"][:, 0],
+        "feature": features["level_l"][:, 0, 0],
     }
 
     return tensor2float(scalar_outputs["loss"]), tensor2float(scalar_outputs), tensor2numpy(image_outputs)
