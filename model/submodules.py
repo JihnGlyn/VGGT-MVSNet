@@ -59,6 +59,40 @@ def conf_regression(p, n=4):
     return conf.squeeze(1)
 
 
+def get_cur_depth_range_samples(depth, num_depths, depth_range_scale, min_depth, max_depth, init=False):
+    device = min_depth.device
+    b, h, w = depth.shape
+    depth = depth.unsqueeze(1)
+    inverse_min_depth = 1.0 / min_depth
+    inverse_max_depth = 1.0 / max_depth
+    if init is True:
+        depth_sample = torch.arange(start=0, end=num_depths, step=1, device=device).view(
+            1, num_depths, 1, 1).repeat(b, 1, h, w).float()
+
+        depth_sample = inverse_max_depth.view(b, 1, 1, 1) + depth_sample / num_depths * (
+                inverse_min_depth.view(b, 1, 1, 1) - inverse_max_depth.view(b, 1, 1, 1))
+
+        return 1.0 / depth_sample
+    else:
+        depth_sample = (
+            torch.arange(-num_depths // 2, num_depths // 2, 1, device=device)
+            .view(1, num_depths, 1, 1).repeat(b, 1, h, w).float()
+        )
+        inverse_depth_interval = (inverse_min_depth - inverse_max_depth) * depth_range_scale
+        inverse_depth_interval = inverse_depth_interval.view(b, 1, 1, 1)
+
+        depth_sample = 1.0 / depth.detach() + inverse_depth_interval * depth_sample
+
+        depth_clamped = []
+        del depth
+        for k in range(b):
+            depth_clamped.append(
+                torch.clamp(depth_sample[k], min=inverse_max_depth[k], max=inverse_min_depth[k]).unsqueeze(0)
+            )
+
+        return 1.0 / torch.cat(depth_clamped, dim=0)
+
+
 def homo_warping(src_fea, src_proj, ref_proj, depth_samples):
     # src_fea: [B, C, Hin, Win] source features, for each source view in batch
     # src_proj: [B, 4, 4] source camera projection matrix, for each source view in batch
@@ -148,39 +182,6 @@ def homo_warping_grad(src_fea, src_proj, ref_proj, depth_samples):
         padding_mode="zeros",
         align_corners=True,
     ).view(batch, channels, num_depth, height, width)
-
-
-def get_cur_depth_range_samples(depth, num_depths, depth_range_scale, min_depth, max_depth, init=False):
-    device = min_depth.device
-    b, h, w = depth.shape
-    depth = depth.unsqueeze(1)
-    inverse_min_depth = 1.0 / min_depth
-    inverse_max_depth = 1.0 / max_depth
-    if init is True:
-        depth_sample = torch.arange(start=0, end=num_depths, step=1, device=device).view(
-            1, num_depths, 1, 1).repeat(b, 1, h, w).float()
-
-        depth_sample = inverse_max_depth.view(b, 1, 1, 1) + depth_sample / num_depths * (
-                inverse_min_depth.view(b, 1, 1, 1) - inverse_max_depth.view(b, 1, 1, 1))
-
-        return 1.0 / depth_sample
-    else:
-        depth_sample = (
-            torch.arange(-1, 1, 2.0 / num_depths, device=device)
-            .view(1, num_depths, 1, 1).repeat(b, 1, h, w).float()
-        )  # [B,D,H,W]
-        inverse_depth_interval = (inverse_min_depth - inverse_max_depth) * depth_range_scale
-        inverse_depth_interval = inverse_depth_interval.view(b, 1, 1, 1)
-        # [B,1,H,W]+[B,1,1,1]*[B,D,H,W] -> [B,D,H,W]
-        depth_sample = 1.0 / depth.detach() + inverse_depth_interval * depth_sample
-
-        depth_clamped = []
-        for k in range(b):
-            depth_clamped.append(
-                torch.clamp(depth_sample[k], min=inverse_max_depth[k], max=inverse_min_depth[k]).unsqueeze(0)
-            )
-
-        return 1.0 / torch.cat(depth_clamped, dim=0)
 
 
 def init_bn(module):

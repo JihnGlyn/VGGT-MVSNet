@@ -1,5 +1,3 @@
-import fontTools.ttLib.tables.O_S_2f_2
-
 from vggt.models.vggt import VGGT
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
@@ -47,7 +45,7 @@ def postprocess_cams(intrinsic, extrinsic, scale: float = 2.0):
     return proj
 
 
-def extract_depth_range(depth, conf, threshold=0.9, widen_threshold=0.2):
+def extract_depth_range(depth, conf, threshold=1.0, widen_threshold=0.2):
     """
 
     :param depth: [B, N, H, W]
