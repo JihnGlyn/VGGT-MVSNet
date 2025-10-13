@@ -34,7 +34,7 @@ class MVSNet(nn.Module):
             # [B, C, D, H, W] -> [B, G, C/G, D, H, W]
             warped_volume = homo_warping(src_fea, src_proj, ref_proj, depth_hypo).view(B, self.G, C // self.G, D, H, W)
             similarity = (warped_volume * ref_volume).mean(2)  # B G D H W
-            if view_weights is None:
+            if is_empty(view_weights):
                 view_weight = self.pixel_wise_net(similarity)
                 view_weights_list.append(view_weight)
             else:
@@ -54,7 +54,7 @@ class MVSNet(nn.Module):
         prob_volume_pre = self.reg_net(similarity).squeeze(1)
         prob_volume = torch.exp(F.log_softmax(prob_volume_pre, dim=1))
 
-        if view_weights is None:
+        if is_empty(view_weights):
             view_weights = torch.cat(view_weights_list, dim=1)  # [B,N-1,H,W]
 
         if not wta:

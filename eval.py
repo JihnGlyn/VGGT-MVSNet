@@ -176,20 +176,20 @@ def save_depth():
             start_time = time.time()
             sample_cuda = tocuda(sample)
             # TODO:
-            depth_list, conf_list, intrinsics, extrinsics = model(model=vggt_model,
-                                                                  imgs=sample_cuda["imgs"],
-                                                                  num_depths=args.num_depths,
-                                                                  depth_interal_ratio=args.depth_interal_ratio,
-                                                                  iteration=args.iteration,
-                                                                  pair=sample_cuda["pair_view"],
-                                                                  )
+            outputs = model(model=vggt_model,
+                            imgs=sample_cuda["imgs"],
+                            num_depths=args.num_depths,
+                            depth_interal_ratio=args.depth_interal_ratio,
+                            iteration=args.iteration,
+                            pair=sample_cuda["pair_view"],
+                            )
 
-            depth_list = tensor2numpy(depth_list)
-            conf_list = tensor2numpy(conf_list)
+            depth_list = tensor2numpy(outputs["depths"])
+            conf_list = tensor2numpy(outputs["photo_confs"])
 
-            intrinsics = tensor2numpy(intrinsics)
+            intrinsics = tensor2numpy(outputs["intrinsic"])
             intrinsics = np.squeeze(intrinsics, 0)
-            extrinsics = tensor2numpy(extrinsics)
+            extrinsics = tensor2numpy(outputs["extrinsic"])
             extrinsics = np.squeeze(extrinsics, 0)
             del sample_cuda
             print('Iter {}/{}, time = {:.3f}'.format(batch_idx, len(TestImgLoader), time.time() - start_time))
@@ -390,7 +390,8 @@ if __name__ == '__main__':
             scan_id = int(scan[4:])
             scan_folder = os.path.join(args.testpath, scan)
             out_folder = os.path.join(args.outdir, scan)
-            filter_depth(scan_folder, out_folder, scan, os.path.join(args.outdir, 'vggtmvs{:0>3}_l3.ply'.format(scan_id)),
+            filter_depth(scan_folder, out_folder, scan,
+                         os.path.join(args.outdir, 'vggtmvs{:0>3}_l3.ply'.format(scan_id)),
                          args.geo_pixel_thres, args.geo_depth_thres, args.photo_thres, img_wh, 4)
     elif args.dataset == "tanks":
         # intermediate dataset

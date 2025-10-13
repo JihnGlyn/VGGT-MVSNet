@@ -50,7 +50,7 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
 
     for epoch_idx in range(start_epoch, args.epochs):
         print("Epoch {}:".format(epoch_idx + 1))
-        global_step = len(TrainImgLoader) * epoch_idx
+        glob_step = len(TrainImgLoader) * epoch_idx
         print("========== Training !==========")
         for batch_idx, sample in enumerate(TrainImgLoader):
             start_time = time.time()
@@ -81,7 +81,7 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
             if do_summary:
                 save_scalars(logger, 'test', scalar_outputs, global_step)
                 save_images(logger, 'test', image_outputs, global_step)
-                save_scalars(logger, 'full_test', avg_test_scalars.mean(), global_step)
+                save_scalars(logger, 'test', avg_test_scalars.mean(), glob_step)
                 print(
                     "Testing Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, test loss:{:.3f}, low:{:.3f}, mid:{:.3f}, high:{:.3f}, ssim:{:.3f}, time:{:.3f}".format(
                         epoch_idx + 1, args.epochs, batch_idx, len(TestImgLoader),
@@ -113,14 +113,18 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
 
     sample_cuda = tocuda(sample)
 
-    depth_est, cams, features, masks = train_model(model=vggt_model,
-                                                   imgs=sample_cuda["imgs"],
-                                                   num_depths=args.num_depths,
-                                                   depth_interal_ratio=args.depth_interal_ratio,
-                                                   iteration=args.iteration,
-                                                   )
+    outputs = train_model(model=vggt_model,
+                          imgs=sample_cuda["imgs"],
+                          num_depths=args.num_depths,
+                          depth_interal_ratio=args.depth_interal_ratio,
+                          iteration=args.iteration,
+                          )
+    depth_est = outputs["depths"]
+    cams = outputs["projs"]
+    masks = outputs["masks"]
+    features = outputs["features"]
 
-    loss, ssim, mse, l, m, h = train_loss(sample_cuda["imgs"], features, cams, depth_est, masks)
+    loss, ssim, mse, l, m, h = train_loss(sample_cuda["imgs"], cams, depth_est, masks)
 
     loss.backward()
     optimizer.step()
@@ -135,12 +139,12 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
     }
 
     image_outputs = {
-        "depth_1": depth_est[0],
-        "depth_2": depth_est[1],
-        "depth_3": depth_est[2],
+        "depth_1": depth_est[0] * masks["level_l"],
+        "depth_2": depth_est[1] * masks["level_m"],
+        "depth_3": depth_est[2] * masks["level_h"],
         "vggt_depth": depth_est[3],
         "ref_img": sample["imgs"]["level_1"][:, 0],
-        "feature": features["level_l"][:, 0, 0],
+        "feature": features["level_l"][:, 0],
     }
 
     return tensor2float(scalar_outputs["loss"]), tensor2float(scalar_outputs), tensor2numpy(image_outputs)
@@ -161,9 +165,9 @@ if __name__ == '__main__':
                         help='epoch ids to downscale lr and the downscale rate')
     parser.add_argument('--wd', type=float, default=0.0001, help='weight decay')
     parser.add_argument('--nviews', type=int, default=5, help='total number of views')
-    parser.add_argument('--num_depths', type=int, default=8, help='total number of depths')
+    parser.add_argument('--num_depths', type=int, default=[8, 8, 8], help='total number of depths')
     parser.add_argument('--iteration', type=int, default=2, help='total number of iterations')
-    parser.add_argument('--depth_interal_ratio', type=float, default=0.25, help='search range')
+    parser.add_argument('--depth_interal_ratio', type=float, default=[0.025, 0.0125, 0.005], help='search range')
     parser.add_argument('--batch_size', type=int, default=1, help='train batch size')
     parser.add_argument('--loadckpt', default=None, help='load a specific checkpoint')
     parser.add_argument('--logdir', default='./checkpoints', help='the directory to save checkpoints/logs')

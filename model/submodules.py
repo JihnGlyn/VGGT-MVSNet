@@ -3,33 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def resize_img(image):
-    # image: [B, 3, H, W]
-    _, _, h, w = image.shape
-    max_edge = max(h, w)
-    if max_edge <= 2072:
-        return image
-
-    scale = 2072 / max_edge
-    if h >= w:
-        new_h = 2072
-        new_w = int(w * scale)
-    else:
-        new_w = 2072
-        new_h = int(h * scale)
-
-    image = F.interpolate(image, size=(new_h, new_w), mode='bilinear', align_corners=False)
-    return image
-
-
-def create_stage_images(image: torch.Tensor):
-    return [
-        image,
-        F.interpolate(image, scale_factor=0.5, mode="nearest"),
-        F.interpolate(image, scale_factor=0.25, mode="nearest"),
-    ]
-
-
 def depth_regression(p, depth_values):
     if depth_values.dim() <= 2:
         # print("regression dim <= 2")
@@ -62,8 +35,8 @@ def conf_regression(p, n=4):
 
 def get_cur_depth_range_samples(depth, num_depths, depth_range_scale, min_depth, max_depth, init=False):
     device = min_depth.device
-    b, h, w = depth.shape
-    depth = depth.unsqueeze(1)
+    b, _, h, w = depth.shape
+    # depth = depth.unsqueeze(1)
     inverse_min_depth = 1.0 / min_depth
     inverse_max_depth = 1.0 / max_depth
     if init is True:
@@ -351,3 +324,7 @@ class Deconv2d(nn.Module):
         init_uniform(self.conv, init_method)
         if self.bn is not None:
             init_bn(self.bn)
+
+
+def is_empty(x: torch.Tensor) -> bool:
+    return x.numel() == 0
