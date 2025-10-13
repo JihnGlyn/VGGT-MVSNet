@@ -4,6 +4,61 @@ import torch.nn.functional as F
 from model.submodules import *
 
 
+class FeatureNet(nn.Module):
+    def __init__(self, base_channels=8):
+        super(FeatureNet, self).__init__()
+        self.base_channels = base_channels
+
+        self.conv0 = nn.Sequential(
+                Conv2d(3, base_channels, 3, 1),
+                Conv2d(base_channels, base_channels, 3, 1))
+
+        self.conv1 = nn.Sequential(
+                Conv2d(base_channels, base_channels * 2, 5, stride=2, pad=2),
+                Conv2d(base_channels * 2, base_channels * 2, 3, 1),
+                Conv2d(base_channels * 2, base_channels * 2, 3, 1))
+
+        self.conv2 = nn.Sequential(
+                Conv2d(base_channels * 2, base_channels * 4, 5, stride=2, pad=2),
+                Conv2d(base_channels * 4, base_channels * 4, 3, 1),
+                Conv2d(base_channels * 4, base_channels * 4, 3, 1))
+
+        self.out1 = Conv2d(base_channels * 4, base_channels * 4, 1)
+
+        final_chs = base_channels * 4
+        self.inner1 = nn.Conv2d(base_channels * 2, final_chs, 1, bias=True)
+        self.inner2 = nn.Conv2d(base_channels * 1, final_chs, 1, bias=True)
+
+        self.out2 = Conv2d(final_chs, final_chs, 3, 1)
+        self.out3 = Conv2d(final_chs, final_chs, 3, 1)
+
+        self.out_channels = [4 * base_channels, base_channels * 2, base_channels]
+
+    def forward(self, x):
+        """forward.
+
+        :param x: [B, C, H, W]
+        :return outputs: stage1 [B, 32, 128, 160], stage2 [B, 16, 256, 320], stage3 [B, 8, 512, 640]
+        """
+        conv0 = self.conv0(x)
+        conv1 = self.conv1(conv0)
+        conv2 = self.conv2(conv1)
+
+        intra_feat = conv2
+        outputs = {}
+        out = self.out1(intra_feat)
+        outputs["level_l"] = out
+        intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="nearest") + self.inner1(conv1)
+        out = self.out2(intra_feat)
+        outputs["level_m"] = out
+
+        intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="nearest") + self.inner2(conv0)
+        out = self.out3(intra_feat)
+        outputs["level_h"] = out
+
+        return outputs
+
+
 class FeatureFuse(nn.Module):
     def __init__(self, base_channels=16):
         super(FeatureFuse, self).__init__()

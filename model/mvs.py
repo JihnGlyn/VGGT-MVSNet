@@ -24,6 +24,7 @@ class MVSNet(nn.Module):
         # TODO: step 1. feature map homographic warping and cost volume construction
         _, D, H, W = depth_hypo.shape
         B, C = ref_fea.shape[0], ref_fea.shape[1]
+        ref_fea = F.interpolate(ref_fea, size=(H, W), mode='bilinear', align_corners=True)
         view_weights_list = []
 
         similarity_sum = 0
