@@ -53,71 +53,23 @@ class unsup_loss(nn.Module):
         return total_loss, ssim_loss, recon_loss, stage_loss[0], stage_loss[1], stage_loss[2]
 
 
-class unsup_loss_2(nn.Module):
+class pseudo_loss(nn.Module):
     def __init__(self):
-        super(unsup_loss, self).__init__()
-        self.ssim = SSIM()
-        self.mse = nn.MSELoss()
+        super(pseudo_loss, self).__init__()
         self.s_w = [10, 10, 10]
-        self.l_w = [1, 1]
 
-    def forward(self, imgs, projs, depths, masks):
+    def forward(self, depths, gt_depths, masks):
+        loss = 0.0
+        s = len(depths)
+        stage_loss = []
+        for s in range(s):
+            gt = F.interpolate(gt_depths, scale_factor=1/(2**s), mode='bilinear', align_corners=False)
+            loss = F.smooth_l1_loss(depths[s], gt, reduction='mean') * masks[s]
+            loss *= self.s_w[s]
+            stage_loss.append(loss)
+        total_loss = sum(stage_loss)
 
-        ssim_loss = 0.0
-        mse_loss = 0.0
-
-        ssim_l = 0.0
-        ssim_m = 0.0
-        ssim_h = 0.0
-        mse_l = 0.0
-        mse_m = 0.0
-        mse_h = 0.0
-        # LOW-RES
-        ref_i, src_is = imgs["level_2"][:, 0], imgs["level_2"][:, 1:2]  # USING ONLY 2 SRCS FOR LOSS
-        ref_pr, src_prs = projs["level_l"][0], projs["level_l"][1:2]
-        mask = masks["level_l"]
-        d = depths[0]   # [B,1,H,W]
-        for i, (src_i, src_pr) in enumerate(zip(src_is, src_prs)):
-            ref_i = ref_i * mask
-            warped_img = homo_warping_grad(src_is[:, i], src_pr, ref_pr, d).squeeze(2) * mask  # [B,C,1,H,W] -> [B,C,H,W]
-            ssim_l = torch.mean(self.ssim(ref_i, warped_img)) + ssim_l
-            mse_l = self.mse(ref_i, warped_img) + mse_l
-        ssim_loss = ssim_l + ssim_loss
-        mse_loss = mse_l + mse_loss
-        lr = ssim_l + mse_l
-
-        # MID-RES
-        ref_i, src_is = imgs["level_1"][:, 0], imgs["level_1"][:, 1:2]  # USING ONLY 2 SRCS FOR LOSS
-        ref_pr, src_prs = projs["level_m"][0], projs["level_m"][1:2]
-        mask = masks["level_m"]
-        d = depths[1]
-        for i, (src_i, src_pr) in enumerate(zip(src_is, src_prs)):
-            ref_i = ref_i * mask
-            warped_img = homo_warping_grad(src_is[:, i], src_pr, ref_pr, d).squeeze(2) * mask  # [B,C,1,H,W] -> [B,C,H,W]
-            ssim_m = torch.mean(self.ssim(ref_i, warped_img)) + ssim_m
-            mse_m = self.mse(ref_i, warped_img) + mse_m
-        ssim_loss = ssim_m + ssim_loss
-        mse_loss = mse_m + mse_loss
-        mr = ssim_m + mse_m
-
-        # HIGH-RES
-        ref_i, src_is = imgs["level_0"][:, 0], imgs["level_0"][:, 1:2]  # USING ONLY 2 SRCS FOR LOSS
-        ref_pr, src_prs = projs["level_h"][0], projs["level_h"][1:2]
-        mask = masks["level_h"]
-        d = depths[2]
-        for i, (src_i, src_pr) in enumerate(zip(src_is, src_prs)):
-            ref_i = ref_i * mask
-            warped_img = homo_warping_grad(src_is[:, i], src_pr, ref_pr, d).squeeze(2) * mask  # [B,C,1,H,W] -> [B,C,H,W]
-            ssim_h = torch.mean(self.ssim(ref_i, warped_img)) + ssim_h
-            mse_h = self.mse(ref_i, warped_img) + mse_h
-        ssim_loss = ssim_h + ssim_loss
-        mse_loss = mse_h + mse_loss
-        hr = ssim_h + mse_h
-
-        # total_loss = self.l_w[0] * ssim_loss + self.l_w[1] * mse_loss
-        total_loss = self.s_w[0] * lr + self.s_w[1] * mr + self.s_w[2] * hr
-
-        return total_loss, ssim_loss, mse_loss, lr, mr, hr
+        return total_loss, stage_loss[0], stage_loss[1], stage_loss[2]
 
 
 class SSIM(nn.Module):

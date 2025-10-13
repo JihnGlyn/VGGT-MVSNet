@@ -62,13 +62,12 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
                 save_scalars(logger, 'train', scalar_outputs, global_step)
                 save_images(logger, 'train', image_outputs, global_step)
                 print(
-                    "Training Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, train loss:{:.3f}, low:{:.3f}, mid:{:.3f}, high:{:.3f}, ssim:{:.3f}, time:{:.3f}".format(
+                    "Training Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, train loss:{:.3f}, low:{:.3f}, mid:{:.3f}, high:{:.3f}, time:{:.3f}".format(
                         epoch_idx + 1, args.epochs, batch_idx, len(TrainImgLoader),
                         optimizer.param_groups[0]["lr"], loss,
                         scalar_outputs["low_res_loss"],
                         scalar_outputs["mid_res_loss"],
                         scalar_outputs["high_res_loss"],
-                        scalar_outputs["ssim_loss"],
                         time.time() - start_time))
             del scalar_outputs, image_outputs
         print("========== Testing !==========")
@@ -83,13 +82,12 @@ def train(model, model_loss, optimizer, TrainImgLoader, TestImgLoader, start_epo
                 save_images(logger, 'test', image_outputs, global_step)
                 save_scalars(logger, 'test', avg_test_scalars.mean(), glob_step)
                 print(
-                    "Testing Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, test loss:{:.3f}, low:{:.3f}, mid:{:.3f}, high:{:.3f}, ssim:{:.3f}, time:{:.3f}".format(
+                    "Testing Epoch:{}/{}, Iter:{}/{}, lr:{:.6f}, test loss:{:.3f}, low:{:.3f}, mid:{:.3f}, high:{:.3f}, time:{:.3f}".format(
                         epoch_idx + 1, args.epochs, batch_idx, len(TestImgLoader),
                         optimizer.param_groups[0]["lr"], loss,
                         scalar_outputs["low_res_loss"],
                         scalar_outputs["mid_res_loss"],
                         scalar_outputs["high_res_loss"],
-                        scalar_outputs["ssim_loss"],
                         time.time() - start_time))
                 avg_test_scalars.update(scalar_outputs)
             del scalar_outputs, image_outputs
@@ -122,9 +120,9 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
     depth_est = outputs["depths"]
     cams = outputs["projs"]
     masks = outputs["masks"]
-    features = outputs["features"]
+    # features = outputs["features"]
 
-    loss, ssim, mse, l, m, h = train_loss(sample_cuda["imgs"], cams, depth_est, masks)
+    loss, l, m, h = train_loss(sample_cuda["imgs"], cams, depth_est, masks)
 
     loss.backward()
     optimizer.step()
@@ -134,18 +132,15 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
         "low_res_loss": l,
         "mid_res_loss": m,
         "high_res_loss": h,
-        'ssim_loss': ssim,
-        'mse_loss': mse,
     }
 
     image_outputs = {
+        "ref_img": sample["imgs"]["level_1"][:, 0],
         "depth_1": depth_est[0] * masks["level_l"],
         "depth_2": depth_est[1] * masks["level_m"],
         "depth_3": depth_est[2] * masks["level_h"],
         "vggt_depth": depth_est[3],
-        "ref_img": sample["imgs"]["level_1"][:, 0],
-        "feature": features["level_l"].mean(dim=1),
-        "depth_dist": (depth_est[0]-depth_est[3]).abs() * masks["level_l"],
+        "err_3": (depth_est[2] - depth_est[3]).abs() * masks["level_h"],
     }
 
     return tensor2float(scalar_outputs["loss"]), tensor2float(scalar_outputs), tensor2numpy(image_outputs)
@@ -214,7 +209,7 @@ if __name__ == '__main__':
     model = VGGT4MVS()
     model.to(device)
 
-    model_loss = unsup_loss()
+    model_loss = pseudo_loss()
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, betas=(0.9, 0.999),
                            weight_decay=args.wd)
 
