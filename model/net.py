@@ -67,7 +67,7 @@ def output_cams_loss(intrinsic, extrinsic):
     return {"level_l": cam_mat1, "level_m": cam_mat2, "level_h": cam_mat3}
 
 
-def extract_depth_range(depth, conf, threshold=0.1, widen_threshold=0.2):
+def extract_depth_range(depth, conf, threshold=0.6, widen_threshold=0.2):
     """
 
     :param depth: [B, N, H, W]
@@ -78,25 +78,21 @@ def extract_depth_range(depth, conf, threshold=0.1, widen_threshold=0.2):
     """
     B, N, H, W = conf.shape
     reshaped_conf = conf.view(B * N, H, W)
-    normalized_list = []
-    for i in range(B * N):
-        sub_conf = reshaped_conf[i]
-        min_val = sub_conf.min()
-        max_val = sub_conf.max()
-        range_val = max_val - min_val
-        if range_val == 0:
-            range_val = 1e-8
-        sub_conf_normalized = (sub_conf - min_val) / range_val
-        normalized_list.append(sub_conf_normalized.unsqueeze(0))
-    normalized_reshaped = torch.cat(normalized_list, dim=0)
+    min_vals = reshaped_conf.min(dim=(1, 2), keepdim=True)[0]
+    max_vals = reshaped_conf.max(dim=(1, 2), keepdim=True)[0]
+    range_vals = max_vals - min_vals
+    range_vals[range_vals == 0] = 1e-8
+    normalized_reshaped = (reshaped_conf - min_vals) / range_vals
     conf_norm = normalized_reshaped.view(B, N, H, W)
 
     mask = conf_norm > threshold
+    mask = mask[:, [0]].float()
+
     depth_masked = torch.where(mask, depth, torch.tensor(float('-inf'), dtype=depth.dtype, device=depth.device))
-    max_depths = torch.max(depth_masked.view(depth.shape[0], -1), dim=1)[0]
+    max_depths = torch.max(depth_masked.view(B, -1), dim=1)[0]
 
     depth_masked = torch.where(mask, depth, torch.tensor(float('inf'), dtype=depth.dtype, device=depth.device))
-    min_depths = torch.min(depth_masked.view(depth.shape[0], -1), dim=1)[0]
+    min_depths = torch.min(depth_masked.view(B, -1), dim=1)[0]
 
     max_depths = torch.where(torch.isinf(max_depths), torch.tensor(0, dtype=depth.dtype, device=depth.device),
                              max_depths)
@@ -106,7 +102,6 @@ def extract_depth_range(depth, conf, threshold=0.1, widen_threshold=0.2):
     depth_ranges = max_depths - min_depths
     max_depths += (depth_ranges * widen_threshold)
     min_depths -= (depth_ranges * widen_threshold).clamp(min=0.1)
-    mask = mask[:, [0]].float()
 
     return max_depths, min_depths, mask
 
@@ -133,7 +128,7 @@ class VGGT4MVS(nn.Module):
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
         extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_coarse, dtype=dtype)
 
-        depth_max, depth_min, mask = extract_depth_range(vggt_depths, vggt_confs, threshold=0.08, widen_threshold=0.1)
+        depth_max, depth_min, mask = extract_depth_range(vggt_depths, vggt_confs, threshold=0.63, widen_threshold=0.1)
         view_weights = torch.empty(0, device=depth_max.device)
 
         output_mask = {
@@ -216,8 +211,7 @@ class VGGT4MVS(nn.Module):
                 depth_hypos = get_cur_depth_range_samples(depth_sample.detach(), num_depths[s], depth_interal_ratio[s],
                                                           depth_min, depth_max, False)
                 mvsnet_outputs = self.mvs[s](ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
-                view_weights, depth_sample = mvsnet_outputs["view_weights"], mvsnet_outputs["depth"].unsqueeze(
-                    1)
+                view_weights, depth_sample = mvsnet_outputs["view_weights"], mvsnet_outputs["depth"].unsqueeze(1)
                 output_depths.append(depth_sample)  # [B,1,H,W]
                 if s < 2:
                     # UPSAMPLING DEPTH MAP AND PIXEL-WISE VIEW WEIGHT FOR NEXT STAGE
