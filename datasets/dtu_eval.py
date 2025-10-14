@@ -33,7 +33,7 @@ class MVSDataset(Dataset):
                     ref_view = int(f.readline().rstrip())
                     src_views = [int(x) for x in f.readline().rstrip().split()[1::2]]
                     # light conditions 0-6
-                    metas.append((scan, ref_view, src_views))
+                    metas.append((scan, ref_view, src_views[:self.nviews]))
                     # for light_idx in range(7):
                     #     metas.append((scan, light_idx, ref_view, src_views))
             folder_metas.append(metas)
@@ -88,7 +88,7 @@ class MVSDataset(Dataset):
         # data is numpy array
         return {
                 "imgs": imgs,   # [B, 49, 3, H, W]
-                "pair_view": pair_views,    # [B, 49, 10]
+                "pair_view": pair_views,    # [B, 49, N]
                 "filename": os.path.join(scan, "{}", "{:0>8}" + "{}"),
                 "scan": os.path.join(scan),
         }
