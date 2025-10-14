@@ -14,7 +14,7 @@ class unsup_loss(nn.Module):
         self.s_w = [10, 10, 10]
         self.l_w = [1, 1]
 
-    def forward(self, imgs, projs, depths, masks):
+    def forward(self, imgs, projs, depths, masks, with_mask=False):
 
         ssim_loss = 0.0
         recon_loss = 0.0
@@ -34,8 +34,9 @@ class unsup_loss(nn.Module):
             ref_pr = ref_pr_list[s]
             src_prs = src_prs_list[s]
             mask = mask_list[s].permute(0, 2, 3, 1)
-
-            ref_i = ref_i.permute(0, 2, 3, 1) * mask  # [B, C, H, W] --> [B, H, W, C]
+            ref_i = ref_i.permute(0, 2, 3, 1)
+            if with_mask:
+                ref_i = ref_i * mask  # [B, C, H, W] --> [B, H, W, C]
 
             recon_l, ssim_l = 0.0, 0.0
             for i in range(nviews):
@@ -43,7 +44,8 @@ class unsup_loss(nn.Module):
                 src_i = src_i.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
                 src_pr = src_prs[:, i]
                 warped_i, mask_warp = inverse_warping(src_i, ref_pr, src_pr, d)
-                warped_i = warped_i * mask
+                if with_mask:
+                    warped_i = warped_i * mask
                 recon_l += compute_reconstr_loss(warped_i, ref_i, mask_warp, simple=False)
                 ssim_l += torch.mean(self.ssim(ref_i, warped_i, mask_warp))
             recon_loss += (recon_l * self.l_w[1])
@@ -56,15 +58,16 @@ class unsup_loss(nn.Module):
 class pseudo_loss(nn.Module):
     def __init__(self):
         super(pseudo_loss, self).__init__()
-        self.s_w = [10, 10, 10]
+        self.s_w = [1000, 1000, 1000]
 
     def forward(self, depths, gt_depths, masks):
-        loss = 0.0
-        s = len(depths)
+        # s = len(depths)
         stage_loss = []
-        for s in range(s):
-            gt = F.interpolate(gt_depths, scale_factor=1/(2**s), mode='bilinear', align_corners=False)
-            loss = F.smooth_l1_loss(depths[s], gt, reduction='mean') * masks[s]
+        gts = [F.interpolate(gt_depths, scale_factor=0.25, mode='bilinear', align_corners=False),
+               F.interpolate(gt_depths, scale_factor=0.5, mode='bilinear', align_corners=False),
+               gt_depths]
+        for s, (depth, gt) in enumerate(zip(depths, gts)):
+            loss = F.smooth_l1_loss(depth * masks[s], gt * masks[s], reduction='mean')
             loss *= self.s_w[s]
             stage_loss.append(loss)
         total_loss = sum(stage_loss)

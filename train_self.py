@@ -139,14 +139,23 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
     }
 
     image_outputs = {
-        "depth_1": depth_est[0] * masks["level_l"],
-        "depth_2": depth_est[1] * masks["level_m"],
-        "depth_3": depth_est[2] * masks["level_h"],
+        "depth_1": depth_est[0],
+        "depth_2": depth_est[1],
+        "depth_3": depth_est[2],
         "vggt_depth": depth_est[3],
         "ref_img": sample["imgs"]["level_1"][:, 0],
         "feature": features["level_l"].mean(dim=1),
-        "depth_dist": (depth_est[0]-depth_est[3]).abs() * masks["level_l"],
+        "depth_dist": (depth_est[0]-depth_est[3]).abs(),
     }
+    # image_outputs = {
+    #     "depth_1": depth_est[0] * masks["level_l"],
+    #     "depth_2": depth_est[1] * masks["level_m"],
+    #     "depth_3": depth_est[2] * masks["level_h"],
+    #     "vggt_depth": depth_est[3],
+    #     "ref_img": sample["imgs"]["level_1"][:, 0],
+    #     "feature": features["level_l"].mean(dim=1),
+    #     "depth_dist": (depth_est[0] - depth_est[3]).abs() * masks["level_l"],
+    # }
 
     return tensor2float(scalar_outputs["loss"]), tensor2float(scalar_outputs), tensor2numpy(image_outputs)
 
