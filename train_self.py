@@ -124,7 +124,7 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
     masks = outputs["masks"]
     features = outputs["features"]
 
-    loss, ssim, mse, l, m, h = train_loss(sample_cuda["imgs"], cams, depth_est, masks)
+    loss, ssim, mse, l, m, h, warp_img = train_loss(sample_cuda["imgs"], cams, depth_est, masks)
 
     loss.backward()
     optimizer.step()
@@ -146,6 +146,7 @@ def train_sample(train_model, train_loss, train_optimizer, sample, is_training, 
         "ref_img": sample["imgs"]["level_1"][:, 0],
         "feature": features["level_l"].mean(dim=1),
         "depth_dist": (depth_est[0]-depth_est[3]).abs(),
+        "warped_img": warp_img
     }
     # image_outputs = {
     #     "depth_1": depth_est[0] * masks["level_l"],

@@ -22,9 +22,11 @@ class unsup_loss(nn.Module):
         nviews = 2
 
         ref_i_list = [imgs["level_2"][:, 0], imgs["level_1"][:, 0], imgs["level_0"][:, 0]]  # USING ONLY 2 SRCS FOR LOSS
-        src_is_list = [imgs["level_2"][:, 1:1+nviews], imgs["level_1"][:, 1:1+nviews], imgs["level_0"][:, 1:1+nviews]]
+        src_is_list = [imgs["level_2"][:, 1:1 + nviews], imgs["level_1"][:, 1:1 + nviews],
+                       imgs["level_0"][:, 1:1 + nviews]]
         ref_pr_list = [projs["level_l"][:, 0], projs["level_m"][:, 0], projs["level_h"][:, 0]]
-        src_prs_list = [projs["level_l"][:, 1:1+nviews], projs["level_m"][:, 1:1+nviews], projs["level_h"][:, 1:1+nviews]]
+        src_prs_list = [projs["level_l"][:, 1:1 + nviews], projs["level_m"][:, 1:1 + nviews],
+                        projs["level_h"][:, 1:1 + nviews]]
         mask_list = [masks["level_l"], masks["level_m"], masks["level_h"]]
 
         for s in range(self.stage):
@@ -34,9 +36,9 @@ class unsup_loss(nn.Module):
             ref_pr = ref_pr_list[s]
             src_prs = src_prs_list[s]
             mask = mask_list[s].permute(0, 2, 3, 1)
-            ref_i = ref_i.permute(0, 2, 3, 1)
+            ref_i = ref_i.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
             if with_mask:
-                ref_i = ref_i * mask  # [B, C, H, W] --> [B, H, W, C]
+                ref_i = ref_i * mask
 
             recon_l, ssim_l = 0.0, 0.0
             for i in range(nviews):
@@ -52,7 +54,8 @@ class unsup_loss(nn.Module):
             ssim_loss += (ssim_l * self.l_w[0])
             stage_loss.append((ssim_l * self.l_w[0] + recon_l * self.l_w[1]) * self.s_w[s])
         total_loss = sum(stage_loss)
-        return total_loss, ssim_loss, recon_loss, stage_loss[0], stage_loss[1], stage_loss[2]
+        return (total_loss, ssim_loss, recon_loss, stage_loss[0], stage_loss[1], stage_loss[2],
+                (warped_i*mask_warp).permute(0, 3, 1, 2))
 
 
 class pseudo_loss(nn.Module):

@@ -215,11 +215,11 @@ class VGGT4MVS(nn.Module):
                 ref_fea, src_feas = features[s][0], features[s][1:]
                 depth_hypos = get_cur_depth_range_samples(depth_sample.detach(), num_depths[s], depth_interal_ratio[s],
                                                           depth_min, depth_max, False)
-                if s == 0:
-                    depth_hypos_low_conf = get_cur_depth_range_samples(depth_sample.detach(), num_depths[s],
-                                                                       depth_interal_ratio[s],
-                                                                       depth_min, depth_max, True)
-                    depth_hypos = depth_hypos * mask + depth_hypos_low_conf * (1 - mask)
+                # if s == 0:
+                #     depth_hypos_low_conf = get_cur_depth_range_samples(depth_sample.detach(), num_depths[s],
+                #                                                        depth_interal_ratio[s],
+                #                                                        depth_min, depth_max, True)
+                #     depth_hypos = depth_hypos * mask + depth_hypos_low_conf * (1 - mask)
                 mvsnet_outputs = self.mvs[s](ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
                 view_weights, depth_sample = mvsnet_outputs["view_weights"], mvsnet_outputs["depth"].unsqueeze(1)
                 output_depths.append(depth_sample)  # [B,1,H,W]
