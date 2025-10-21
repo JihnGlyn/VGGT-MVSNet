@@ -58,15 +58,15 @@ class MVSDataset(Dataset):
         if self.mode == 'train':
             img = self.color_augment(img)
         # scale 0~255 to -1~1
-        np_img = 2 * np.array(img, dtype=np.float32) / 255. - 1
+        np_img = np.array(img, dtype=np.float32) / 255.
         h, w, _ = np_img.shape
 
         # new_h, new_w = (h // 56) * 56, (w // 56) * 56
         new_h, new_w = (h // 112) * 112, (w // 112) * 112
         np_img_ms = {
-            "level_2": cv2.resize(np_img, (new_w // 4, new_h // 4), interpolation=cv2.INTER_LINEAR),
-            "level_1": cv2.resize(np_img, (new_w // 2, new_h // 2), interpolation=cv2.INTER_LINEAR),
-            "level_0": cv2.resize(np_img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            "level_2": np_img.resize((w // 4, h // 4), Image.Resampling.BICUBIC),
+            "level_1": np_img.resize((w // 2, h // 2), Image.Resampling.BICUBIC),
+            "level_0": np_img.resize((w, h), Image.Resampling.BICUBIC),
         }
         return np_img_ms
 
