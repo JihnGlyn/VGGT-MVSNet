@@ -43,7 +43,8 @@ class MVSDataset(Dataset):
                     ref_view = int(f.readline().rstrip())
                     src_views = [int(x) for x in f.readline().rstrip().split()[1::2]]
                     # light conditions 0-6
-                    light_idx = random.randint(0, 6)
+                    # light_idx = random.randint(0, 6)
+                    light_idx = 3
                     metas.append((scan, light_idx, ref_view, src_views))
                     # for light_idx in range(7):
                     #     metas.append((scan, light_idx, ref_view, src_views))
@@ -55,18 +56,18 @@ class MVSDataset(Dataset):
 
     def read_img(self, filename):
         img = Image.open(filename)
-        if self.mode == 'train':
-            img = self.color_augment(img)
+        # if self.mode == 'train':
+        #     img = self.color_augment(img)
         # scale 0~255 to -1~1
         np_img = np.array(img, dtype=np.float32) / 255.
         h, w, _ = np_img.shape
 
         # new_h, new_w = (h // 56) * 56, (w // 56) * 56
-        new_h, new_w = (h // 112) * 112, (w // 112) * 112
+        h, w = (h // 112) * 112, (w // 112) * 112
         np_img_ms = {
-            "level_2": np_img.resize((w // 4, h // 4), Image.Resampling.BICUBIC),
-            "level_1": np_img.resize((w // 2, h // 2), Image.Resampling.BICUBIC),
-            "level_0": np_img.resize((w, h), Image.Resampling.BICUBIC),
+            "level_2": cv2.resize(np_img, (w // 4, h // 4), interpolation=cv2.INTER_NEAREST),
+            "level_1": cv2.resize(np_img, (w // 2, h // 2), interpolation=cv2.INTER_NEAREST),
+            "level_0": cv2.resize(np_img, (w, h), interpolation=cv2.INTER_NEAREST),
         }
         return np_img_ms
 

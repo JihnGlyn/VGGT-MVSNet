@@ -33,7 +33,58 @@ def conf_regression(p, n=4):
     return conf.squeeze(1)
 
 
+def PhotometricConfidence(score: torch.Tensor, d_idx: torch.Tensor = None) -> torch.Tensor:
+    # score [B,D,H,W]
+    num_depth = score.size()[1]
+    score_sum4 = 4 * F.avg_pool3d(
+        F.pad(score.unsqueeze(1), pad=(0, 0, 0, 0, 1, 2)), (4, 1, 1), stride=1, padding=0
+    ).squeeze(1)
+    # [B, 1, H, W]
+    if d_idx is None:
+        depth_index = depth_regression(
+            score, depth_values=torch.arange(num_depth, device=score.device, dtype=torch.float)
+        ).long().clamp(0, num_depth - 1)
+    else:
+        min_d, max_d = d_idx.min(dim=1, keepdim=True)[0], d_idx.max(dim=1, keepdim=True)[0]     # [B,1,H,W]
+        depth_values = (d_idx - min_d) / (max_d - min_d) * (num_depth - 1)  # [0,N-1]
+        depth_index = torch.sum(score * depth_values, dim=1, keepdim=True).long().clamp(0, num_depth - 1)
+    photometric_confidence = torch.gather(score_sum4, 1, depth_index)
+
+    return photometric_confidence
+
+
 def get_cur_depth_range_samples(depth, num_depths, depth_range_scale, min_depth, max_depth, init=False):
+    device = min_depth.device
+    b, _, h, w = depth.shape
+    if init is True:
+        depth_sample = torch.arange(start=0, end=num_depths, step=1, device=device).view(
+            1, num_depths, 1, 1).repeat(b, 1, h, w).float()
+
+        depth_sample = min_depth.view(b, 1, 1, 1) + depth_sample / num_depths * (
+                max_depth.view(b, 1, 1, 1) - min_depth.view(b, 1, 1, 1))
+
+        return depth_sample
+    else:
+        depth_sample = (
+            torch.arange(-num_depths // 2, num_depths // 2, 1, device=device)
+            .view(1, num_depths, 1, 1).repeat(b, 1, h, w).float()
+        )
+        depth_interval = (max_depth - min_depth) * depth_range_scale
+        depth_interval = depth_interval.view(b, 1, 1, 1)
+
+        depth_sample = depth.detach() + depth_interval * depth_sample
+
+        depth_clamped = []
+        del depth
+        for k in range(b):
+            depth_clamped.append(
+                torch.clamp(depth_sample[k], min=min_depth[k], max=max_depth[k]).unsqueeze(0)
+            )
+
+        return torch.cat(depth_clamped, dim=0)
+
+
+def get_cur_depth_range_samples_inverse(depth, num_depths, depth_range_scale, min_depth, max_depth, init=False):
     device = min_depth.device
     b, _, h, w = depth.shape
     # depth = depth.unsqueeze(1)
@@ -176,68 +227,41 @@ def init_uniform(module, init_method):
 
 
 class Conv3d(nn.Module):
-    """Applies a 3D convolution (optionally with batch normalization and relu activation)
-    over an input signal composed of several input planes.
+    """Implements of 3d convolution + batch normalization + ReLU."""
 
-    Attributes:
-        conv (nn.Module): convolution module
-        bn (nn.Module): batch normalization module
-        relu (bool): whether to activate by relu
-
-    Notes:
-        Default momentum for batch normalization is set to be 0.01,
-
-    """
-
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,
-                 relu=True, bn=True, bn_momentum=0.1, init_method="xavier", **kwargs):
+    def __init__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            kernel_size: int = 3,
+            stride: int = 1,
+            padding: int = 1,
+            dilation: int = 1,
+    ) -> None:
+        """initialization method for convolution3D + batch normalization + relu module
+        Args:
+            in_channels: input channel number of convolution layer
+            out_channels: output channel number of convolution layer
+            kernel_size: kernel size of convolution layer
+            stride: stride of convolution layer
+            pad: pad of convolution layer
+            dilation: dilation of convolution layer
+        """
         super(Conv3d, self).__init__()
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        assert stride in [1, 2]
-        self.stride = stride
+        self.conv = nn.Conv3d(
+            in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, bias=False
+        )
+        self.bn = nn.BatchNorm3d(out_channels)
 
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride=stride,
-                              bias=(not bn), **kwargs)
-        self.bn = nn.BatchNorm3d(out_channels, momentum=bn_momentum) if bn else None
-        # self.bn = nn.GroupNorm(8, out_channels) if bn else None
-        self.relu = relu
-
-        # assert init_method in ["kaiming", "xavier"]
-        # self.init_weights(init_method)
-
-    def forward(self, x):
-        x = self.conv(x)
-        if self.bn is not None:
-            x = self.bn(x)
-        if self.relu:
-            x = F.relu(x, inplace=True)
-        return x
-
-    def init_weights(self, init_method):
-        """default initialization"""
-        init_uniform(self.conv, init_method)
-        if self.bn is not None:
-            init_bn(self.bn)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """forward method"""
+        return F.relu(self.bn(self.conv(x)), inplace=True)
 
 
-class Deconv3d(nn.Module):
-    """Applies a 3D deconvolution (optionally with batch normalization and relu activation)
-       over an input signal composed of several input planes.
-
-       Attributes:
-           conv (nn.Module): convolution module
-           bn (nn.Module): batch normalization module
-           relu (bool): whether to activate by relu
-
-       Notes:
-           Default momentum for batch normalization is set to be 0.01,
-
-       """
-
+class Deconv3dUnit(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,
                  relu=True, bn=True, bn_momentum=0.1, init_method="xavier", **kwargs):
-        super(Deconv3d, self).__init__()
+        super(Deconv3dUnit, self).__init__()
         self.out_channels = out_channels
         assert stride in [1, 2]
         self.stride = stride
@@ -245,11 +269,7 @@ class Deconv3d(nn.Module):
         self.conv = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride,
                                        bias=(not bn), **kwargs)
         self.bn = nn.BatchNorm3d(out_channels, momentum=bn_momentum) if bn else None
-        # self.bn = nn.GroupNorm(8, out_channels) if bn else None
         self.relu = relu
-
-        # assert init_method in ["kaiming", "xavier"]
-        # self.init_weights(init_method)
 
     def forward(self, x):
         y = self.conv(x)
@@ -259,21 +279,29 @@ class Deconv3d(nn.Module):
             x = F.relu(x, inplace=True)
         return x
 
-    def init_weights(self, init_method):
-        """default initialization"""
-        init_uniform(self.conv, init_method)
-        if self.bn is not None:
-            init_bn(self.bn)
 
-
-class Conv2d(nn.Module):
+class ConvBnReLU(nn.Module):
     """Implements 2d Convolution + batch normalization + ReLU"""
 
     def __init__(
             self,
-            in_channels: int, out_channels: int, kernel_size: int = 3, stride: int = 1, pad: int = 1, dilation: int = 1,
+            in_channels: int,
+            out_channels: int,
+            kernel_size: int = 3,
+            stride: int = 1,
+            pad: int = 1,
+            dilation: int = 1,
     ) -> None:
-        super(Conv2d, self).__init__()
+        """initialization method for convolution2D + batch normalization + relu module
+        Args:
+            in_channels: input channel number of convolution layer
+            out_channels: output channel number of convolution layer
+            kernel_size: kernel size of convolution layer
+            stride: stride of convolution layer
+            pad: pad of convolution layer
+            dilation: dilation of convolution layer
+        """
+        super(ConvBnReLU, self).__init__()
         self.conv = nn.Conv2d(
             in_channels, out_channels, kernel_size, stride=stride, padding=pad, dilation=dilation, bias=False
         )

@@ -9,62 +9,73 @@ class FeatureNet(nn.Module):
         super(FeatureNet, self).__init__()
         self.base_channels = base_channels
 
-        self.conv0 = nn.Sequential(
-                Conv2d(3, base_channels, 3, 1),
-                Conv2d(base_channels, base_channels, 3, 1))
+        self.conv0a = ConvBnReLU(3, base_channels, 3, 1)
+        self.conv0b = ConvBnReLU(base_channels, base_channels, 3, 1)
 
-        self.conv1 = nn.Sequential(
-                Conv2d(base_channels, base_channels * 2, 5, stride=2, pad=2),
-                Conv2d(base_channels * 2, base_channels * 2, 3, 1),
-                Conv2d(base_channels * 2, base_channels * 2, 3, 1))
+        self.conv1a = ConvBnReLU(base_channels, base_channels * 2, 5, stride=2, pad=2)
+        self.conv1b = ConvBnReLU(base_channels * 2, base_channels * 2, 3, 1)
+        self.conv1c = ConvBnReLU(base_channels * 2, base_channels * 2, 3, 1)
 
-        self.conv2 = nn.Sequential(
-                Conv2d(base_channels * 2, base_channels * 4, 5, stride=2, pad=2),
-                Conv2d(base_channels * 4, base_channels * 4, 3, 1),
-                Conv2d(base_channels * 4, base_channels * 4, 3, 1))
+        self.conv2a = ConvBnReLU(base_channels * 2, base_channels * 4, 5, stride=2, pad=2)
+        self.conv2b = ConvBnReLU(base_channels * 4, base_channels * 4, 3, 1)
+        self.conv2c = ConvBnReLU(base_channels * 4, base_channels * 4, 3, 1)
 
-        self.out1 = Conv2d(base_channels * 4, base_channels * 4, 1)
+        self.conv3a = ConvBnReLU(base_channels * 4, base_channels * 8, 5, stride=2, pad=2)
+        self.conv3b = ConvBnReLU(base_channels * 8, base_channels * 8, 3, 1)
+        self.conv3c = ConvBnReLU(base_channels * 8, base_channels * 8, 3, 1)
 
-        final_chs = base_channels * 4
-        self.inner1 = nn.Conv2d(base_channels * 2, final_chs, 1, bias=True)
-        self.inner2 = nn.Conv2d(base_channels * 1, final_chs, 1, bias=True)
+        # self.out0 = nn.Conv2d(base_channels * 8, base_channels * 8, 1, bias=False)
 
-        self.out2 = Conv2d(final_chs, final_chs, 3, 1)
-        self.out3 = Conv2d(final_chs, final_chs, 3, 1)
+        final_chs = base_channels * 8
+        self.inner1 = nn.Conv2d(base_channels * 4, final_chs, 1, bias=True)
+        self.inner2 = nn.Conv2d(base_channels * 2, final_chs, 1, bias=True)
+        self.inner3 = nn.Conv2d(base_channels * 1, final_chs, 1, bias=True)
+        self.out1 = nn.Conv2d(final_chs, 32, 3, 1, bias=False)
+        self.out2 = nn.Conv2d(final_chs, 16, 3, 1, bias=False)
+        self.out3 = nn.Conv2d(final_chs, 16, 3, 1, bias=False)
 
-        self.out_channels = [4 * base_channels, base_channels * 2, base_channels]
-
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         """forward.
 
         :param x: [B, C, H, W]
         :return outputs: stage1 [B, 32, 128, 160], stage2 [B, 16, 256, 320], stage3 [B, 8, 512, 640]
         """
-        conv0 = self.conv0(x)
-        conv1 = self.conv1(conv0)
-        conv2 = self.conv2(conv1)
+        conv0 = self.conv0b(self.conv0a(x))
+        conv1 = self.conv1c(self.conv1b(self.conv1a(conv0)))
+        conv2 = self.conv2c(self.conv2b(self.conv2a(conv1)))
+        conv3 = self.conv3c(self.conv3b(self.conv3a(conv2)))
 
-        intra_feat = conv2
+        intra_feat = conv3
         outputs = {}
+        # out = self.out1(intra_feat)
+        # outputs["level_l"] = out
+        intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="bilinear", align_corners=False) + self.inner1(conv2)
+        del conv3
+        del conv2
+
         out = self.out1(intra_feat)
         outputs["level_l"] = out
-        intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="nearest") + self.inner1(conv1)
+        intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="bilinear", align_corners=False) + self.inner2(conv1)
+        del conv1
+
         out = self.out2(intra_feat)
         outputs["level_m"] = out
+        intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="bilinear", align_corners=False) + self.inner3(conv0)
+        del conv0
 
-        intra_feat = F.interpolate(intra_feat, scale_factor=2, mode="nearest") + self.inner2(conv0)
         out = self.out3(intra_feat)
         outputs["level_h"] = out
+        del intra_feat
 
         return outputs
 
 
 class FeatureFuse(nn.Module):
-    def __init__(self, base_channels=16):
+    def __init__(self, base_channels=64, out_channels=64):
         super(FeatureFuse, self).__init__()
-        self.deconv1 = Deconv2d(in_channels=16, out_channels=base_channels, stride=2, padding=1, output_padding=1)
-        self.conv1 = Conv2d(3, base_channels, kernel_size=3, pad=1)
-        self.fuse1 = Conv2d(base_channels * 2, base_channels, kernel_size=3, pad=1)
+        self.deconv1 = Deconv2d(in_channels=256, out_channels=base_channels, stride=2, padding=1, output_padding=1)
+        self.conv1 = ConvBnReLU(3, base_channels, kernel_size=3, pad=1)
+        self.fuse1 = ConvBnReLU(base_channels * 2, out_channels, kernel_size=3, pad=1)
 
     def forward(self, image, vggt_feature):
         # image:[B,3,H/2,W/2] vggt_feature:[B,16,H/4,W/4]
@@ -79,15 +90,15 @@ class RefineNet(nn.Module):
     def __init__(self, base_channels=8):
         super(RefineNet, self).__init__()
         # img: [B,3,H,W]
-        self.conv0 = Conv2d(in_channels=3, out_channels=base_channels)
+        self.conv0 = ConvBnReLU(in_channels=3, out_channels=base_channels)
         # depth map:[B,1,H/2,W/2]
-        self.conv1 = Conv2d(in_channels=1, out_channels=base_channels)
-        self.conv2 = Conv2d(in_channels=base_channels, out_channels=base_channels)
+        self.conv1 = ConvBnReLU(in_channels=1, out_channels=base_channels)
+        self.conv2 = ConvBnReLU(in_channels=base_channels, out_channels=base_channels)
         self.deconv = nn.ConvTranspose2d(
             in_channels=base_channels, out_channels=base_channels, kernel_size=3, padding=1, output_padding=1, stride=2, bias=False
         )
         self.bn = nn.BatchNorm2d(base_channels)
-        self.conv3 = Conv2d(in_channels=base_channels * 2, out_channels=base_channels)
+        self.conv3 = ConvBnReLU(in_channels=base_channels * 2, out_channels=base_channels)
         self.res = nn.Conv2d(in_channels=base_channels, out_channels=1, kernel_size=3, padding=1, bias=False)
 
     def forward(self, img, depth_0, depth_min, depth_max):
@@ -103,66 +114,64 @@ class RefineNet(nn.Module):
         del deconv
 
         depth = F.interpolate(depth, scale_factor=2.0, mode="nearest") + res
+        output = depth * (depth_max - depth_min).view(batch_size, 1, 1, 1) + depth_min.view(batch_size, 1, 1, 1)
         # convert the normalized depth back
-        return depth * (depth_max - depth_min).view(batch_size, 1, 1, 1) + depth_min.view(batch_size, 1, 1, 1)
-
-
-class CostRegNetBig(nn.Module):
-    def __init__(self, in_channels, base_channels=8):
-        super(CostRegNetBig, self).__init__()
-        self.conv0 = Conv3d(in_channels, base_channels, padding=1)
-
-        self.conv1 = Conv3d(base_channels, base_channels * 2, stride=2, padding=1)
-        self.conv2 = Conv3d(base_channels * 2, base_channels * 2, padding=1)
-
-        self.conv3 = Conv3d(base_channels * 2, base_channels * 4, stride=2, padding=1)
-        self.conv4 = Conv3d(base_channels * 4, base_channels * 4, padding=1)
-
-        self.conv5 = Conv3d(base_channels * 4, base_channels * 8, stride=2, padding=1)
-        self.conv6 = Conv3d(base_channels * 8, base_channels * 8, padding=1)
-
-        self.conv7 = Deconv3d(base_channels * 8, base_channels * 4, stride=2, padding=1, output_padding=1)
-
-        self.conv9 = Deconv3d(base_channels * 4, base_channels * 2, stride=2, padding=1, output_padding=1)
-
-        self.conv11 = Deconv3d(base_channels * 2, base_channels * 1, stride=2, padding=1, output_padding=1)
-
-        self.prob = nn.Conv3d(base_channels, 1, 3, stride=1, padding=1, bias=False)
-
-    def forward(self, x):
-        conv0 = self.conv0(x)
-        conv2 = self.conv2(self.conv1(conv0))
-        conv4 = self.conv4(self.conv3(conv2))
-        x = self.conv6(self.conv5(conv4))
-        x = conv4 + self.conv7(x)
-        x = conv2 + self.conv9(x)
-        x = conv0 + self.conv11(x)
-        x = self.prob(x)
-        return x
+        return {"depth": output}
 
 
 class CostRegNet(nn.Module):
-    def __init__(self, in_channels, base_channels=16):
+    def __init__(self, G: int, base_channels: int = 8, deep: bool = True) -> None:
+        """Initialize method
+        Args:
+            G: the feature channels of input will be divided evenly into G groups
+        """
         super(CostRegNet, self).__init__()
-        self.conv0 = Conv3d(in_channels, base_channels, padding=1)
+        self.deep = deep
+        self.conv0 = Conv3d(in_channels=G, out_channels=base_channels, kernel_size=3)
+        self.conv1 = Conv3d(in_channels=base_channels, out_channels=base_channels * 2, stride=2, padding=1)
+        self.conv2 = Conv3d(in_channels=base_channels * 2, out_channels=base_channels * 2)
+        self.conv3 = Conv3d(in_channels=base_channels * 2, out_channels=base_channels * 4, stride=2, padding=1)
+        self.conv4 = Conv3d(in_channels=base_channels * 4, out_channels=base_channels * 4)
+        if deep:
+            self.conv5 = Conv3d(in_channels=base_channels * 4, out_channels=base_channels * 8, stride=2, padding=1)
+            self.conv6 = Conv3d(in_channels=base_channels * 8, out_channels=base_channels * 8)
+            self.deconv3 = Deconv3dUnit(in_channels=base_channels * 8, out_channels=base_channels * 4, stride=2,
+                                        padding=1,
+                                        output_padding=1)
+        self.deconv2 = Deconv3dUnit(in_channels=base_channels * 4, out_channels=base_channels * 2, stride=2, padding=1,
+                                    output_padding=1)
+        self.deconv1 = Deconv3dUnit(in_channels=base_channels * 2, out_channels=base_channels, stride=2, padding=1,
+                                    output_padding=1)
+        self.similarity = nn.Conv3d(in_channels=base_channels, out_channels=1, kernel_size=1, stride=1, padding=0)
 
-        self.conv1 = Conv3d(base_channels, base_channels * 2, stride=2, padding=1)
-        self.conv2 = Conv3d(base_channels * 2, base_channels * 2, padding=1)
-        self.conv3 = Conv3d(base_channels * 2, base_channels * 4, stride=2, padding=1)
-        self.conv4 = Conv3d(base_channels * 4, base_channels * 4, padding=1)
-
-        self.conv5 = Deconv3d(base_channels * 4, base_channels * 2, stride=2, padding=1, output_padding=1)
-        self.conv6 = Deconv3d(base_channels * 2, base_channels * 1, stride=2, padding=1, output_padding=1)
-        self.prob = nn.Conv3d(base_channels, 1, 3, stride=1, padding=1, bias=False)
-
-    def forward(self, x):
-        conv0 = self.conv0(x)
+    # @make_nograd_func
+    def forward(self, x1: torch.Tensor) -> torch.Tensor:
+        # [B,G,D,H,W] -> [B,C,D,H,W]
+        conv0 = self.conv0(x1)
+        # [B,C,D,H,W] -> [B,2C,D,H/2,W/2]
         conv2 = self.conv2(self.conv1(conv0))
-        x = self.conv4(self.conv3(conv2))
-        x = conv2 + self.conv5(x)
-        x = conv0 + self.conv6(x)
-        x = self.prob(x)
-        return x
+        # [B,2C,D,H/2,W/2] -> [B,4C,D,H/4,W/4]
+        conv4 = self.conv4(self.conv3(conv2))
+        if self.deep:
+            # [B,4C,D,H/4,W/4] -> [B,8C,D,H/8,W/8]
+            x = self.conv6(self.conv5(conv4))
+            # [B,4C,D,H/4,W/4] -> [B,2C,D,H/2,W/2]
+            t = self.deconv3(x)
+            x = conv4 + F.interpolate(t, size=conv4.shape[2:], mode='nearest')
+            # [B,4C,D,H/4,W/4] -> [B,2C,D,H/2,W/2]
+            t = self.deconv2(x)
+        else:
+            t = self.deconv2(conv4)
+        # x = conv2 + t
+        x = conv2 + F.interpolate(t, size=conv2.shape[2:], mode='nearest')
+        # [B,2C,D,H/2,W/2] -> [B,C,D,H,W]
+        t = self.deconv1(x)
+        # x = conv0 + t
+        x = conv0 + F.interpolate(t, size=conv0.shape[2:], mode='nearest')
+        # [B,C,D,H,W] -> [B,1,D,H,W] -> [B,D,H,W]
+        similarity = self.similarity(x).squeeze(1)
+        # [B,D,H,W]
+        return similarity
 
 
 class PixelwiseNet(nn.Module):

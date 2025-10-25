@@ -1,0 +1,268 @@
+import torch.nn.parallel
+import argparse
+import datetime
+import gc
+import json
+import os
+import sys
+import time
+
+import torch.backends.cudnn as cudnn
+import torch.nn.parallel
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+
+# from tensorboardX import SummaryWriter
+from datasets import find_dataset_def
+from model.loss import *
+from model.net import *
+from utils import *
+
+cudnn.benchmark = True
+
+num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+
+
+def load_config_from_json(myparser, json_file_path='./config/default.json'):
+    args = myparser.parse_args()
+    try:
+        with open(json_file_path, 'r') as f:
+            config = json.load(f)
+        for key, value in config.items():
+            if hasattr(args, key):
+                setattr(args, key, value)
+            else:
+                print(f"Warning: Key '{key}' in JSON file is not a valid argument.")
+    except FileNotFoundError:
+        print(f"Error: JSON file '{json_file_path}' not found.")
+    except json.JSONDecodeError:
+        print(f"Error: Failed to decode JSON file '{json_file_path}'.")
+
+    return args
+
+
+def train(model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args):
+    milestones = [len(TrainImgLoader) * int(epoch_idx) for epoch_idx in args.lrepochs.split(':')[0].split(',')]
+    lr_gamma = 1 / float(args.lrepochs.split(':')[1])
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=lr_gamma, last_epoch=start_epoch - 1)
+
+    for epoch_idx in range(start_epoch, args.epochs):
+        print("========== Training !==========")
+        print("Epoch {}:".format(epoch_idx + 1))
+        scheduler.step()
+
+        # training
+        process_samples(args, train_sample, "train", logger, model, TrainImgLoader, optimizer, epoch_idx)
+        logger.flush()
+
+        # checkpoint and TorchScript module
+        if (epoch_idx + 1) % args.save_freq == 0:
+            torch.save(
+                {"epoch": epoch_idx, "model": model.state_dict(), "optimizer": optimizer.state_dict()},
+                os.path.join(args.logdir, "model_{:0>6}.ckpt".format(epoch_idx))
+            )
+
+        # testing
+        process_samples(args, test_sample, "test", logger, model, TestImgLoader, optimizer, epoch_idx)
+        logger.flush()
+
+        logger.close()
+
+
+def process_samples(
+        args, sample_function, tag, logger, model,
+        image_loader, optimizer, epoch_idx
+) -> None:
+    num_images = len(image_loader)
+    global_step = num_images * epoch_idx
+    avg_test_scalars = DictAverageMeter()
+    for batch_idx, sample in enumerate(image_loader):
+        start_time = time.time()
+        global_step = num_images * epoch_idx + batch_idx
+        do_scalar_summary = global_step % args.summary_freq == 0
+        do_image_summary = global_step % (50 * args.summary_freq) == 0
+        loss, scalar_outputs, image_outputs = sample_function(model, sample, optimizer)
+
+        if do_scalar_summary:
+            save_scalars(logger, tag, scalar_outputs, global_step)
+        if do_image_summary:
+            save_images(logger, tag, image_outputs, global_step)
+
+        avg_test_scalars.update(scalar_outputs)
+        print("Epoch {}/{}, Iter {}/{}, {} loss = {:.3f}, time = {:.3f}".format(
+            epoch_idx + 1, args.epochs, batch_idx + 1, num_images, tag, loss, time.time() - start_time))
+
+    print("End of processing {} samples.".format(tag))
+    if tag == "test":
+        save_scalars(logger, "full_test", avg_test_scalars.mean(), global_step)
+        print("avg_test_scalars:", avg_test_scalars.mean())
+
+
+def process_sample(train_model, sample, is_training, train_optimizer):
+    if is_training:
+        train_model.train()
+        train_optimizer.zero_grad()
+    else:
+        train_model.eval()
+
+    sample_cuda = tocuda(sample)
+
+    outputs = train_model(model=vggt_model,
+                          imgs=sample_cuda["imgs"],
+                          num_depths=args.num_depths,
+                          depth_interal_ratio=args.depth_interal_ratio,
+                          iteration=args.iteration,
+                          )
+    depth_est = outputs["depths"]
+    masks = outputs["masks"]
+    depth_gt = outputs["gt_depths"]
+
+    loss = pseudo_loss(depth_est, depth_gt, masks)
+    if is_training:
+        loss.backward()
+        optimizer.step()
+
+    scalar_outputs = {
+        "loss": loss,
+    }
+
+    image_outputs = {
+        "ref_img": sample["imgs"]["level_1"][0],
+        "vggt_depth": depth_gt[0] * masks[0],
+    }
+    # iterate over stages
+    for i in range(3):
+        scalar_outputs[f"depth-error-stage-{i}"] = absolute_depth_error_metrics(depth_est[i], depth_gt[i], masks[i].bool())
+        # image_outputs[f"depth-stage-{i}"] = depth_est[i] * masks[i].bool()
+        image_outputs[f"depth-stage-{i}"] = depth_est[i]
+        image_outputs[f"error-map-stage-{i}"] = (depth_est[i] - depth_gt[i]).abs() * masks[i].bool()
+
+    for t in [1, 2, 4, 8]:
+        scalar_outputs[f"depth-thres-{t}mm-error"] = threshold_metrics(depth_est[0], depth_gt[0], masks[0].bool(), float(t)//200)
+
+    return tensor2float(scalar_outputs["loss"]), tensor2float(scalar_outputs), tensor2numpy(image_outputs)
+
+
+def train_sample(train_model, sample, optimizer):
+    return process_sample(train_model, sample, True, optimizer)
+
+
+@make_nograd_func
+def test_sample(train_model, sample, optimizer):
+    return process_sample(train_model, sample, False,  optimizer)
+
+
+def find_latest_checkpoint(path: str) -> str:
+    saved_models = [fn for fn in os.listdir(path) if fn.endswith(".ckpt")]
+    if len(saved_models) == 0:
+        return ""
+
+    saved_models = sorted(saved_models, key=lambda x: int(x.split("_")[-1].split(".")[0]))
+    return os.path.join(path, saved_models[-1])
+
+
+if __name__ == '__main__':
+    # args = myparser.parse_args()
+    parser = argparse.ArgumentParser(description='A PyTorch Implementation of VGGT4MVS')
+    parser.add_argument('--device', default='cuda', help='select model')
+    parser.add_argument('--dataset', default='dtu', help='select dataset')
+    parser.add_argument('--trainpath', help='train datapath')
+    parser.add_argument('--testpath', help='test datapath')
+    parser.add_argument('--trainlist', help='train list')
+    parser.add_argument('--testlist', help='test list')
+    parser.add_argument('--epochs', type=int, default=16, help='number of epochs to train')
+    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
+    parser.add_argument('--lrepochs', type=str, default="4,6,8:2",
+                        help='epoch ids to downscale lr and the downscale rate')
+    parser.add_argument('--wd', type=float, default=0, help='weight decay')
+    parser.add_argument('--nviews', type=int, default=5, help='total number of views')
+    parser.add_argument('--num_depths', type=int, default=[8, 8, 8], help='total number of depths')
+    parser.add_argument('--iteration', type=int, default=2, help='total number of iterations')
+    parser.add_argument('--depth_interal_ratio', type=float, default=[0.025, 0.0125, 0.005], help='search range')
+    parser.add_argument('--batch_size', type=int, default=1, help='train batch size')
+    parser.add_argument('--loadckpt', default=None, help='load a specific checkpoint')
+    parser.add_argument('--logdir', default='./checkpoints', help='the directory to save checkpoints/logs')
+    parser.add_argument('--resume', action='store_true', help='continue to train the model')
+    parser.add_argument('--summary_freq', type=int, default=10, help='print and summary frequency')
+    parser.add_argument('--save_freq', type=int, default=1, help='save checkpoint frequency')
+    parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed')
+    parser.add_argument('--pin_m', action='store_true', help='data loader pin memory')
+    json_file = './config/default.json'
+    args = load_config_from_json(parser, json_file)
+    # args = parser.parse_args()
+
+    device = torch.device(args.device)
+    # if args.resume:
+    #     assert args.loadckpt is None
+    if args.testpath is None:
+        args.testpath = args.trainpath
+
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+
+    # create logger for mode "train" and "testall"
+    if not os.path.isdir(args.logdir):
+        os.makedirs(args.logdir)
+    current_time_str = str(datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
+    print("current time", current_time_str)
+    print("creating new summary file")
+    logger = SummaryWriter(args.logdir)
+    print("argv:", sys.argv[1:])
+    print_args(args)
+
+    LOCAL_MODEL = True
+    vggt_model = VGGT()
+    if LOCAL_MODEL:
+        vggt_model_path = "./vggtckpt/model.pt"  # todo: select path
+        vggt_model.load_state_dict(torch.load(vggt_model_path, map_location=device))
+    else:
+        _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
+        vggt_model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    vggt_model.eval()
+    vggt_model = vggt_model.to(device)
+    print(f"VGGT Model loaded")
+    model = VGGT4MVS()
+    model.to(device)
+
+    # model_loss = pseudo_loss()
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, betas=(0.9, 0.999),
+                           weight_decay=args.wd)
+
+    # load parameters
+    start_epoch = 0
+    if args.resume:
+        saved_models = [fn for fn in os.listdir(args.logdir) if fn.endswith(".ckpt")]
+        saved_models = sorted(saved_models, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+        # use the latest checkpoint file
+        loadckpt = os.path.join(args.logdir, saved_models[-1])
+        print("resuming", loadckpt)
+        state_dict = torch.load(loadckpt, map_location=torch.device("cpu"))
+        model.load_state_dict(state_dict['model'])
+        optimizer.load_state_dict(state_dict['optimizer'])
+        start_epoch = state_dict['epoch'] + 1
+    elif args.loadckpt:
+        # load checkpoint file specified by args.loadckpt
+        print("loading model {}".format(args.loadckpt))
+        state_dict = torch.load(args.loadckpt, map_location=torch.device("cpu"))
+        model.load_state_dict(state_dict['model'])
+
+    print("start at epoch {}".format(start_epoch))
+    print('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
+
+    # if torch.cuda.is_available():
+    #     print(torch.cuda.device_count(), "GPUs detected!")
+    #     model = nn.DataParallel(model)
+    #     vggt_model = nn.DataParallel(vggt_model)    # TO BE FIXED
+
+    # dataset, dataloader
+    MVSDataset = find_dataset_def(args.dataset)
+    train_dataset = MVSDataset(args.trainpath, args.trainlist, "train", args.nviews, robust_train=True)
+    test_dataset = MVSDataset(args.testpath, args.testlist, "test", args.nviews, robust_train=False)
+
+    TrainImgLoader = DataLoader(train_dataset, args.batch_size, shuffle=True, num_workers=8, drop_last=True,
+                                pin_memory=args.pin_m)
+    TestImgLoader = DataLoader(test_dataset, args.batch_size, shuffle=False, num_workers=4, drop_last=False,
+                               pin_memory=args.pin_m)
+
+    train(model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args)

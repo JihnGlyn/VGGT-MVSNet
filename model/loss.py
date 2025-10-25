@@ -6,18 +6,30 @@ from model.submodules import *
 device = torch.device("cuda")
 
 
+def pseudo_loss(preds, gts, masks):
+    weight = [1, 1, 1]
+    loss = 0.0
+
+    for d, gt, mask, w in zip(preds, gts, masks, weight):
+        mask = mask.bool()
+        loss = w * F.smooth_l1_loss(d[mask], gt[mask], reduction='mean') + loss
+
+    return loss
+
+
 class unsup_loss(nn.Module):
     def __init__(self):
         super(unsup_loss, self).__init__()
         self.stage = 3
         self.ssim = SSIM()
         self.s_w = [10, 10, 10]
-        self.l_w = [1, 1]
+        self.l_w = [6, 15, 0.18]     # ssim recon smooth
 
     def forward(self, imgs, projs, depths, masks, with_mask=False):
 
         ssim_loss = 0.0
         recon_loss = 0.0
+        smooth_loss = 0.0
         stage_loss = []
         nviews = 2
 
@@ -40,6 +52,7 @@ class unsup_loss(nn.Module):
             if with_mask:
                 ref_i = ref_i * mask
 
+            smooth_loss += depth_smoothness(d.unsqueeze(dim=-1), ref_i, 1.0)
             recon_l, ssim_l = 0.0, 0.0
             for i in range(nviews):
                 src_i = src_is[:, i]
@@ -52,30 +65,78 @@ class unsup_loss(nn.Module):
                 ssim_l += torch.mean(self.ssim(ref_i, warped_i, mask_warp))
             recon_loss += (recon_l * self.l_w[1])
             ssim_loss += (ssim_l * self.l_w[0])
-            stage_loss.append((ssim_l * self.l_w[0] + recon_l * self.l_w[1]) * self.s_w[s])
+            stage_loss.append((ssim_l * self.l_w[0] + recon_l * self.l_w[1] + smooth_loss * self.l_w[2]) * self.s_w[s])
         total_loss = sum(stage_loss)
         return (total_loss, ssim_loss, recon_loss, stage_loss[0], stage_loss[1], stage_loss[2],
                 (warped_i*mask_warp).permute(0, 3, 1, 2))
 
 
-class pseudo_loss(nn.Module):
+class unsup_loss_diff(nn.Module):
     def __init__(self):
-        super(pseudo_loss, self).__init__()
-        self.s_w = [1000, 1000, 1000]
+        super(unsup_loss_diff, self).__init__()
+        self.stage = 3
+        self.ssim = SSIM()
+        self.mse = nn.MSELoss(reduction='mean')
+        self.s_w = [10, 10, 10]
+        self.l_w = [1, 1]
 
-    def forward(self, depths, gt_depths, masks):
-        # s = len(depths)
+    def forward(self, imgs, projs, depths, masks, with_mask=False):
+
+        ssim_loss = 0.0
+        recon_loss = 0.0
         stage_loss = []
-        gts = [F.interpolate(gt_depths, scale_factor=0.25, mode='bilinear', align_corners=False),
-               F.interpolate(gt_depths, scale_factor=0.5, mode='bilinear', align_corners=False),
-               gt_depths]
-        for s, (depth, gt) in enumerate(zip(depths, gts)):
-            loss = F.smooth_l1_loss(depth * masks[s], gt * masks[s], reduction='mean')
-            loss *= self.s_w[s]
-            stage_loss.append(loss)
-        total_loss = sum(stage_loss)
+        nviews = 2
 
-        return total_loss, stage_loss[0], stage_loss[1], stage_loss[2]
+        ref_i_list = [imgs["level_2"][:, 0], imgs["level_1"][:, 0], imgs["level_0"][:, 0]]  # USING ONLY 2 SRCS FOR LOSS
+        src_is_list = [imgs["level_2"][:, 1:1 + nviews], imgs["level_1"][:, 1:1 + nviews],
+                       imgs["level_0"][:, 1:1 + nviews]]
+        ref_pr_list = [projs["level_l"][0], projs["level_m"][0], projs["level_h"][0]]
+        src_prs_list = [projs["level_l"][1:1 + nviews], projs["level_m"][1:1 + nviews],
+                        projs["level_h"][1:1 + nviews]]
+        mask_list = [masks["level_l"], masks["level_m"], masks["level_h"]]
+
+        for s in range(self.stage):
+            d = depths[s]  # [B,1,H,W]
+            ref_i = ref_i_list[s]
+            src_is = src_is_list[s]
+            ref_pr = ref_pr_list[s]
+            src_prs = src_prs_list[s]
+            mask = mask_list[s]
+            if with_mask:
+                ref_i = ref_i * mask
+
+            recon_l, ssim_l = 0.0, 0.0
+            for i in range(nviews):
+                src_i = src_is[:, i]
+                src_pr = src_prs[i]
+                warped_i = homo_warping_grad(src_i, src_pr, ref_pr, d)
+                warped_i = warped_i.squeeze(2)
+                if with_mask:
+                    warped_i = warped_i * mask
+                recon_l += self.mse(warped_i, ref_i)
+                ssim_l += torch.mean(self.ssim(ref_i, warped_i, None))
+                # ssim_l += 0
+            recon_loss += (recon_l * self.l_w[1])
+            ssim_loss += (ssim_l * self.l_w[0])
+            stage_loss.append((ssim_l * self.l_w[0] + recon_l * self.l_w[1]) * self.s_w[s])
+        total_loss = sum(stage_loss)
+        warped_i_vggt = homo_warping_grad(src_i, src_pr, ref_pr, depths[-1])
+        return (total_loss, ssim_loss, recon_loss, stage_loss[0], stage_loss[1], stage_loss[2],
+                warped_i, warped_i_vggt.squeeze(2))
+
+
+def depth_smoothness(depth, img, lambda_wt=1):
+    """Computes image-aware depth smoothness loss."""
+    depth = depth.squeeze(1)
+    depth_dx = gradient_x(depth)
+    depth_dy = gradient_y(depth)
+    image_dx = gradient_x(img)
+    image_dy = gradient_y(img)
+    weights_x = torch.exp(-(lambda_wt * torch.mean(torch.abs(image_dx), 3, keepdim=True)))
+    weights_y = torch.exp(-(lambda_wt * torch.mean(torch.abs(image_dy), 3, keepdim=True)))
+    smoothness_x = depth_dx * weights_x
+    smoothness_y = depth_dy * weights_y
+    return torch.mean(torch.abs(smoothness_x)) + torch.mean(torch.abs(smoothness_y))
 
 
 class SSIM(nn.Module):
@@ -94,9 +155,9 @@ class SSIM(nn.Module):
         self.C2 = 0.03 ** 2
 
     def forward(self, x, y, mask):
-        x = x.permute(0, 3, 1, 2)  # [B, H, W, C] --> [B, C, H, W]
-        y = y.permute(0, 3, 1, 2)
-        mask = mask.permute(0, 3, 1, 2)
+        if mask is not None:
+            x = x.permute(0, 3, 1, 2)  # [B, H, W, C] --> [B, C, H, W]
+            y = y.permute(0, 3, 1, 2)
         # [B,C,H,W]
         mu_x = self.mu_x_pool(x)
         mu_y = self.mu_y_pool(y)
@@ -105,9 +166,15 @@ class SSIM(nn.Module):
         sigma_xy = self.sig_xy_pool(x * y) - mu_x * mu_y
         SSIM_n = (2 * mu_x * mu_y + self.C1) * (2 * sigma_xy + self.C2)
         SSIM_d = (mu_x ** 2 + mu_y ** 2 + self.C1) * (sigma_x + sigma_y + self.C2)
-        SSIM_mask = self.mask_pool(mask)
-        output = SSIM_mask * torch.clamp((1 - SSIM_n / SSIM_d) / 2, 0, 1)
-        return output.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
+        # SSIM_mask = self.mask_pool(mask)
+        output = torch.clamp((1 - SSIM_n / SSIM_d) / 2, 0, 1)
+        if mask is not None:
+            mask = mask.permute(0, 3, 1, 2)
+            SSIM_mask = self.mask_pool(mask)
+            output = output * SSIM_mask
+            return output.permute(0, 2, 3, 1)  # [B, C, H, W] --> [B, H, W, C]
+        else:
+            return output
 
 
 def gradient_x(img):
