@@ -131,15 +131,14 @@ class VGGT4MVS(nn.Module):
         # self.fpn = FeatureNet(8)
         self.refinement = RefineNet(base_channels=8)
 
-    def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair=None, dtype=torch.float32):
+    def forward(self, vggt_outputs, imgs, num_depths, depth_interal_ratio, iteration, pair=None):
         # [N] imgs -> [1] ref + [N-1] srcs
         imgs_hr = imgs["level_0"]
         imgs_mr = imgs["level_1"]
-        imgs_lr = imgs["level_2"]
         output_depths = []
 
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
-        extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_lr, dtype=dtype)
+        extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = vggt_outputs
         vggt_fea = torch.unbind(fea_vggt, 1)
         depth_max, depth_min, mask = extract_depth_range(vggt_depths, vggt_confs, threshold=0.3, widen_threshold=0.2)
         mask = mask.detach()
@@ -270,23 +269,21 @@ class CasMVSNet(nn.Module):
     def __init__(self, G=None):
         super(CasMVSNet, self).__init__()
         if G is None:
-            G = [32, 16, 16]
+            G = [8, 8, 8]
         self.G = G
 
         self.mvs_l = MVSNet(G[0])
-        self.mvs_m = MVSNet(G[1], True)
-        self.mvs_h = MVSNet(G[2], True)
+        self.mvs_m = MVSNet(G[1])
+        self.mvs_h = MVSNet(G[2])
         self.fpn = FeatureNet(8)
 
-    def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair=None, dtype=torch.float32):
+    def forward(self, vggt_outputs, imgs, num_depths, depth_interal_ratio, iteration, pair=None):
         # [N] imgs -> [1] ref + [N-1] srcs
         imgs_hr = imgs["level_0"]
-        imgs_mr = imgs["level_1"]
-        imgs_lr = imgs["level_2"]
         output_depths = []
 
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
-        extrinsic, intrinsic, vggt_depths, vggt_confs, _ = run_VGGT(model, imgs_lr, dtype=dtype)
+        extrinsic, intrinsic, vggt_depths, vggt_confs, _ = vggt_outputs
         depth_max, depth_min, mask = extract_depth_range(vggt_depths, vggt_confs, threshold=0.3, widen_threshold=0.2)
         mask = mask.detach()
         # HARD CODED HERE
@@ -315,7 +312,7 @@ class CasMVSNet(nn.Module):
         N = extrinsic.shape[1]
         features_lr, features_mr, features_hr = [], [], []
         for nview_idx in range(N):
-            img = imgs_mr[:, nview_idx]
+            img = imgs_hr[:, nview_idx]
             output_feature = self.fpn(img)
             features_lr.append(output_feature["level_l"])
             features_mr.append(output_feature["level_m"])
@@ -340,8 +337,10 @@ class CasMVSNet(nn.Module):
                                                               depth_min, depth_max, (s == 0))
                     if s == 0:
                         mvsnet_outputs = self.mvs_l(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+                        view_weights = mvsnet_outputs["view_weights"]
                     elif s == 1:
                         mvsnet_outputs = self.mvs_m(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+                        view_weights = mvsnet_outputs["view_weights"]
                     else:
                         mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
 
@@ -350,8 +349,8 @@ class CasMVSNet(nn.Module):
                         # UPSAMPLING DEPTH MAP AND PIXEL-WISE VIEW WEIGHT FOR NEXT STAGE
                         depth_sample = F.interpolate(depth_hypo, scale_factor=2.0, mode='bilinear',
                                                      align_corners=False)
-                        # view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear',
-                        #                              align_corners=False)
+                        view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear',
+                                                     align_corners=False)
 
                 infer_depths.append(depth_sample)
                 infer_confs.append(confs)
@@ -365,7 +364,6 @@ class CasMVSNet(nn.Module):
                 "depths": infer_depths,
                 "photo_confs": infer_confs,
                 "vggt_confs": vggt_confs,
-                # "depths": vggt_d,
                 "intrinsic": intrinsic,
                 "extrinsic": extrinsic
             }
@@ -385,6 +383,7 @@ class CasMVSNet(nn.Module):
                 elif s == 1:
                     mvsnet_outputs = self.mvs_m(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
                     output_depth = mvsnet_outputs["depth"].unsqueeze(1)
+                    view_weights = mvsnet_outputs["view_weights"]
                 else:
                     mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
                     output_depth = mvsnet_outputs["depth"]

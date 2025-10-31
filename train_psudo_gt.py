@@ -209,10 +209,6 @@ if __name__ == '__main__':
     # create logger for mode "train" and "testall"
     if not os.path.isdir(args.logdir):
         os.makedirs(args.logdir)
-    # current_time_str = str(datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
-    # print("current time", current_time_str)
-    # print("creating new summary file")
-    # logger = SummaryWriter(args.logdir)
     print("argv:", sys.argv[1:])
     print_args(args)
 
@@ -230,7 +226,6 @@ if __name__ == '__main__':
     model = VGGT4MVS()
     model.to(device)
 
-    # model_loss = pseudo_loss()
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, betas=(0.9, 0.999),
                            weight_decay=args.wd)
 
