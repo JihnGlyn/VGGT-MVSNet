@@ -116,8 +116,8 @@ class RefineNet(nn.Module):
 
         depth = F.interpolate(depth, scale_factor=2.0, mode="nearest") + res
         output = depth * (depth_max - depth_min).view(batch_size, 1, 1, 1) + depth_min.view(batch_size, 1, 1, 1)
-        # convert the normalized depth back
-        return {"depth": output}
+        # convert the normalized depth back [B,1,H,W]->[B,H,W]
+        return {"depth": output.squeeze(1)}
 
 
 class CostRegNet(nn.Module):

@@ -16,6 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 # from tensorboardX import SummaryWriter
 from datasets import find_dataset_def
 from model.loss import *
+# from model.net_gt import *
 from model.net import *
 from utils import *
 
@@ -42,7 +43,7 @@ def load_config_from_json(myparser, json_file_path='./config/default.json'):
     return args
 
 
-def train(model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args):
+def train(model, vggt_model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args):
     milestones = [len(TrainImgLoader) * int(epoch_idx) for epoch_idx in args.lrepochs.split(':')[0].split(',')]
     lr_gamma = 1 / float(args.lrepochs.split(':')[1])
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=lr_gamma, last_epoch=start_epoch - 1)
@@ -57,7 +58,7 @@ def train(model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args):
         scheduler.step()
 
         # training
-        process_samples(args, train_sample, "train", logger, model, TrainImgLoader, optimizer, epoch_idx)
+        process_samples(args, train_sample, vggt_model, "train", logger, model, TrainImgLoader, optimizer, epoch_idx)
         logger.flush()
 
         # checkpoint and TorchScript module
@@ -68,14 +69,14 @@ def train(model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args):
             )
 
         # testing
-        process_samples(args, test_sample, "test", logger, model, TestImgLoader, optimizer, epoch_idx)
+        process_samples(args, test_sample, vggt_model, "test", logger, model, TestImgLoader, optimizer, epoch_idx)
         logger.flush()
 
     logger.close()
 
 
 def process_samples(
-        args, sample_function, tag, logger, model,
+        args, sample_function, vggt_model, tag, logger, model,
         image_loader, optimizer, epoch_idx
 ) -> None:
     num_images = len(image_loader)
@@ -86,7 +87,7 @@ def process_samples(
         global_step = num_images * epoch_idx + batch_idx
         do_scalar_summary = global_step % args.summary_freq == 0
         do_image_summary = global_step % (10 * args.summary_freq) == 0
-        loss, scalar_outputs, image_outputs = sample_function(model, sample, do_image_summary, optimizer)
+        loss, scalar_outputs, image_outputs = sample_function(model, vggt_model, sample, do_image_summary, optimizer)
 
         if do_scalar_summary:
             save_scalars(logger, tag, scalar_outputs, global_step)
@@ -103,7 +104,7 @@ def process_samples(
         print("avg_test_scalars:", avg_test_scalars.mean())
 
 
-def process_sample(train_model, sample, is_training, image_summary, train_optimizer):
+def process_sample(train_model, vggt_model, sample, is_training, image_summary, train_optimizer):
     if is_training:
         train_model.train()
         train_optimizer.zero_grad()
@@ -112,7 +113,9 @@ def process_sample(train_model, sample, is_training, image_summary, train_optimi
 
     sample_cuda = tocuda(sample)
 
-    outputs = train_model(model=vggt_model,
+    vggt_outputs = run_VGGT(vggt_model, sample_cuda["imgs"]["level_2"])
+
+    outputs = train_model(vggt_outputs=vggt_outputs,
                           imgs=sample_cuda["imgs"],
                           num_depths=args.num_depths,
                           depth_interal_ratio=args.depth_interal_ratio,
@@ -141,6 +144,7 @@ def process_sample(train_model, sample, is_training, image_summary, train_optimi
         # image_outputs[f"depth-stage-{i}"] = depth_est[i] * masks[i].bool()
         if image_summary:
             image_outputs[f"depth-stage-{i}"] = depth_est[i]
+            image_outputs[f"mask-depth-stage-{i}"] = depth_est[i] * masks[i].bool()
             image_outputs[f"error-map-stage-{i}"] = (depth_est[i] - depth_gt[i]).abs() * masks[i].bool()
 
     for t in [1, 2, 4, 8]:
@@ -149,13 +153,13 @@ def process_sample(train_model, sample, is_training, image_summary, train_optimi
     return tensor2float(scalar_outputs["loss"]), tensor2float(scalar_outputs), tensor2numpy(image_outputs)
 
 
-def train_sample(train_model, sample, image_summary, optimizer):
-    return process_sample(train_model, sample, True, image_summary, optimizer)
+def train_sample(train_model, vggt_model, sample, image_summary, optimizer):
+    return process_sample(train_model, vggt_model, sample, True, image_summary, optimizer)
 
 
 @make_nograd_func
-def test_sample(train_model, sample, image_summary, optimizer):
-    return process_sample(train_model, sample, False, image_summary, optimizer)
+def test_sample(train_model, vggt_model, sample, image_summary, optimizer):
+    return process_sample(train_model, vggt_model, sample, False, image_summary, optimizer)
 
 
 def find_latest_checkpoint(path: str) -> str:
@@ -209,6 +213,10 @@ if __name__ == '__main__':
     # create logger for mode "train" and "testall"
     if not os.path.isdir(args.logdir):
         os.makedirs(args.logdir)
+    # current_time_str = str(datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
+    # print("current time", current_time_str)
+    # print("creating new summary file")
+    # logger = SummaryWriter(args.logdir)
     print("argv:", sys.argv[1:])
     print_args(args)
 
@@ -226,6 +234,7 @@ if __name__ == '__main__':
     model = VGGT4MVS()
     model.to(device)
 
+    # model_loss = pseudo_loss()
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, betas=(0.9, 0.999),
                            weight_decay=args.wd)
 
@@ -265,4 +274,4 @@ if __name__ == '__main__':
     TestImgLoader = DataLoader(test_dataset, args.batch_size, shuffle=False, num_workers=4, drop_last=False,
                                pin_memory=args.pin_m)
 
-    train(model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args)
+    train(model, vggt_model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args)

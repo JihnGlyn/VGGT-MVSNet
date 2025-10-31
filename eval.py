@@ -30,19 +30,19 @@ parser.add_argument('--batch_size', type=int, default=1, help='testing batch siz
 parser.add_argument('--n_views', type=int, default=5, help='num of view')
 parser.add_argument('--img_wh', nargs='+', type=int, default=[1600, 1152],
                     help='height and width of the image')
-parser.add_argument('--loadckpt', default='./checkpoints/model_000015.ckpt', help='load a specific checkpoint')
+parser.add_argument('--loadckpt', default='./checkpoints/model_000007.ckpt', help='load a specific checkpoint')
 parser.add_argument('--outdir', default='./outputs_vggt', help='output dir')
 parser.add_argument('--display', action='store_true', help='display depth images and masks')
 
-parser.add_argument('--iteration', type=int, default=2, help='num of iteration')
+parser.add_argument('--iteration', type=int, default=1, help='num of iteration')
 parser.add_argument('--num_depths', type=int, default=[48, 16, 8], help='num of depth')
-parser.add_argument('--depth_interal_ratio', type=float, default=[0.025, 0.025, 0.0125], help='search range')
+parser.add_argument('--depth_interal_ratio', type=float, default=[0.025, 0.0125, 0.001], help='search range')
 
 parser.add_argument('--geo_pixel_thres', type=float, default=1,
                     help='pixel threshold for geometric consistency filtering')
 parser.add_argument('--geo_depth_thres', type=float, default=0.01,
                     help='depth threshold for geometric consistency filtering')
-parser.add_argument('--photo_thres', type=float, default=10.0, help='threshold for photometric consistency filtering')
+parser.add_argument('--photo_thres', type=float, default=20, help='threshold for photometric consistency filtering')
 
 # parse arguments and check
 args = parser.parse_args()
@@ -151,7 +151,7 @@ def save_depth():
 
     # model
     model = VGGT4MVS()
-    model = nn.DataParallel(model)
+    # model = nn.DataParallel(model)    # TO BE FIXED
     model.cuda()
 
     # load checkpoint file specified by args.loadckpt
