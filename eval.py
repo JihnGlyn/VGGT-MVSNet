@@ -35,14 +35,14 @@ parser.add_argument('--outdir', default='./outputs_vggt', help='output dir')
 parser.add_argument('--display', action='store_true', help='display depth images and masks')
 
 parser.add_argument('--iteration', type=int, default=2, help='num of iteration')
-parser.add_argument('--num_depths', type=int, default=8, help='num of depth')
-parser.add_argument('--depth_interal_ratio', type=float, default=0.25, help='search range')
+parser.add_argument('--num_depths', type=int, default=[48, 16, 8], help='num of depth')
+parser.add_argument('--depth_interal_ratio', type=float, default=[0.025, 0.025, 0.0125], help='search range')
 
 parser.add_argument('--geo_pixel_thres', type=float, default=1,
                     help='pixel threshold for geometric consistency filtering')
 parser.add_argument('--geo_depth_thres', type=float, default=0.01,
                     help='depth threshold for geometric consistency filtering')
-parser.add_argument('--photo_thres', type=float, default=2.0, help='threshold for photometric consistency filtering')
+parser.add_argument('--photo_thres', type=float, default=10.0, help='threshold for photometric consistency filtering')
 
 # parse arguments and check
 args = parser.parse_args()
@@ -176,7 +176,8 @@ def save_depth():
             start_time = time.time()
             sample_cuda = tocuda(sample)
             # TODO:
-            outputs = model(model=vggt_model,
+            vggt_outputs = run_VGGT(vggt_model, sample_cuda["imgs"]["level_2"])
+            outputs = model(vggt_outputs=vggt_outputs,
                             imgs=sample_cuda["imgs"],
                             num_depths=args.num_depths,
                             depth_interal_ratio=args.depth_interal_ratio,
@@ -185,7 +186,7 @@ def save_depth():
                             )
 
             depth_list = tensor2numpy(outputs["depths"])
-            conf_list = tensor2numpy(outputs["photo_confs"])
+            conf_list = tensor2numpy(outputs["vggt_confs"])
 
             intrinsics = tensor2numpy(outputs["intrinsic"])
             intrinsics = np.squeeze(intrinsics, 0)
@@ -326,8 +327,8 @@ def filter_depth(scan_folder, out_folder, scan, plyfilename, geo_pixel_thres, ge
 
         depth_est_averaged = (sum(all_srcview_depth_ests) + ref_depth_est) / (geo_mask_sum + 1)
         geo_mask = geo_mask_sum >= geo_mask_thres
-        # final_mask = np.logical_and(photo_mask, geo_mask)
-        final_mask = np.logical_and(photo_mask, 1)
+        final_mask = np.logical_and(photo_mask, geo_mask)
+        # final_mask = np.logical_and(photo_mask, 1)
 
         os.makedirs(os.path.join(out_folder, "mask"), exist_ok=True)
         save_mask(os.path.join(out_folder, "mask/{:0>8}_photo.png".format(ref_view)), photo_mask)

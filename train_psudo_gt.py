@@ -47,8 +47,12 @@ def train(model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args):
     lr_gamma = 1 / float(args.lrepochs.split(':')[1])
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=lr_gamma, last_epoch=start_epoch - 1)
 
+    os.makedirs(args.logdir, exist_ok=True)
+    print("current time: ", str(datetime.datetime.now().strftime("%Y%m%d_%H%M%S")))
+    print("creating new summary file")
+    logger = SummaryWriter(args.logdir)
+
     for epoch_idx in range(start_epoch, args.epochs):
-        print("========== Training !==========")
         print("Epoch {}:".format(epoch_idx + 1))
         scheduler.step()
 
@@ -67,7 +71,7 @@ def train(model, optimizer, TrainImgLoader, TestImgLoader, start_epoch, args):
         process_samples(args, test_sample, "test", logger, model, TestImgLoader, optimizer, epoch_idx)
         logger.flush()
 
-        logger.close()
+    logger.close()
 
 
 def process_samples(
@@ -81,8 +85,8 @@ def process_samples(
         start_time = time.time()
         global_step = num_images * epoch_idx + batch_idx
         do_scalar_summary = global_step % args.summary_freq == 0
-        do_image_summary = global_step % (50 * args.summary_freq) == 0
-        loss, scalar_outputs, image_outputs = sample_function(model, sample, optimizer)
+        do_image_summary = global_step % (10 * args.summary_freq) == 0
+        loss, scalar_outputs, image_outputs = sample_function(model, sample, do_image_summary, optimizer)
 
         if do_scalar_summary:
             save_scalars(logger, tag, scalar_outputs, global_step)
@@ -99,7 +103,7 @@ def process_samples(
         print("avg_test_scalars:", avg_test_scalars.mean())
 
 
-def process_sample(train_model, sample, is_training, train_optimizer):
+def process_sample(train_model, sample, is_training, image_summary, train_optimizer):
     if is_training:
         train_model.train()
         train_optimizer.zero_grad()
@@ -126,31 +130,32 @@ def process_sample(train_model, sample, is_training, train_optimizer):
     scalar_outputs = {
         "loss": loss,
     }
+    if image_summary:
+        image_outputs = {"ref-image": sample["imgs"]["level_1"][0], "vggt_depth": depth_gt[0] * masks[0]}
+    else:
+        image_outputs = {}
 
-    image_outputs = {
-        "ref_img": sample["imgs"]["level_1"][0],
-        "vggt_depth": depth_gt[0] * masks[0],
-    }
     # iterate over stages
     for i in range(3):
         scalar_outputs[f"depth-error-stage-{i}"] = absolute_depth_error_metrics(depth_est[i], depth_gt[i], masks[i].bool())
         # image_outputs[f"depth-stage-{i}"] = depth_est[i] * masks[i].bool()
-        image_outputs[f"depth-stage-{i}"] = depth_est[i]
-        image_outputs[f"error-map-stage-{i}"] = (depth_est[i] - depth_gt[i]).abs() * masks[i].bool()
+        if image_summary:
+            image_outputs[f"depth-stage-{i}"] = depth_est[i]
+            image_outputs[f"error-map-stage-{i}"] = (depth_est[i] - depth_gt[i]).abs() * masks[i].bool()
 
     for t in [1, 2, 4, 8]:
-        scalar_outputs[f"depth-thres-{t}mm-error"] = threshold_metrics(depth_est[0], depth_gt[0], masks[0].bool(), float(t)//200)
+        scalar_outputs[f"depth-thres-{t}mm-error"] = threshold_metrics(depth_est[0], depth_gt[0], masks[0].bool(), float(t))
 
     return tensor2float(scalar_outputs["loss"]), tensor2float(scalar_outputs), tensor2numpy(image_outputs)
 
 
-def train_sample(train_model, sample, optimizer):
-    return process_sample(train_model, sample, True, optimizer)
+def train_sample(train_model, sample, image_summary, optimizer):
+    return process_sample(train_model, sample, True, image_summary, optimizer)
 
 
 @make_nograd_func
-def test_sample(train_model, sample, optimizer):
-    return process_sample(train_model, sample, False,  optimizer)
+def test_sample(train_model, sample, image_summary, optimizer):
+    return process_sample(train_model, sample, False, image_summary, optimizer)
 
 
 def find_latest_checkpoint(path: str) -> str:
@@ -204,10 +209,10 @@ if __name__ == '__main__':
     # create logger for mode "train" and "testall"
     if not os.path.isdir(args.logdir):
         os.makedirs(args.logdir)
-    current_time_str = str(datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
-    print("current time", current_time_str)
-    print("creating new summary file")
-    logger = SummaryWriter(args.logdir)
+    # current_time_str = str(datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
+    # print("current time", current_time_str)
+    # print("creating new summary file")
+    # logger = SummaryWriter(args.logdir)
     print("argv:", sys.argv[1:])
     print_args(args)
 

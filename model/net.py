@@ -6,7 +6,7 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from model.mvs import *
 
 
-def run_VGGT(model, images, dtype):
+def run_VGGT(model, images, dtype=torch.float32):
     # images: [B, 3, H, W]
     # hard-coded to use 518 for VGGT
     # images = F.interpolate(images, size=(resolution, resolution), mode="bilinear", align_corners=False)
@@ -31,11 +31,7 @@ def run_VGGT(model, images, dtype):
     depth_map = depth_map * 200
     extrinsic[:, :, :3, 3] = extrinsic[:, :, :3, 3] * 200
 
-    # extrinsic[B,N,4,4] intrinsic[B,N,3,3] depth[B,N,H,W] conf[B,N,H,W] feature[B,N,256,H,W]
-    # extr = extrinsic.clone().requires_grad_(True)
-    # intr = intrinsic.clone().requires_grad_(True)
-    # depth = depth_map.clone().requires_grad_(True)
-    # conf = depth_conf.clone().requires_grad_(True)
+    # extrinsic[B,N,4,4] intrinsic[B,N,3,3] depth[B,N,H,W] conf[B,N,H,W] feature[B,N,128,H,W]
     return extrinsic, intrinsic, depth_map.squeeze(-1), depth_conf, feature
 
 
@@ -145,9 +141,9 @@ class VGGT4MVS(nn.Module):
         # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
         extrinsic, intrinsic, vggt_depths, vggt_confs, fea_vggt = run_VGGT(model, imgs_lr, dtype=dtype)
         vggt_fea = torch.unbind(fea_vggt, 1)
-        # depth_max, depth_min, mask = extract_depth_range(vggt_depths, vggt_confs, threshold=0.3, widen_threshold=0.5)
         depth_max, depth_min, mask = extract_depth_range(vggt_depths, vggt_confs, threshold=0.3, widen_threshold=0.2)
         mask = mask.detach()
+        # HARD CODED HERE
         depth_max = torch.full((extrinsic.size()[0],), 900, device=intrinsic.device)
         depth_min = torch.full((extrinsic.size()[0],), 30, device=intrinsic.device)
 
@@ -175,7 +171,7 @@ class VGGT4MVS(nn.Module):
         fuse_fea = []
         for nview_idx in range(N):
             img = imgs_mr[:, nview_idx]
-            fuse = self.fuse(vggt_fea[nview_idx], img)
+            fuse = self.fuse(img, vggt_fea[nview_idx])
             fuse_fea.append(fuse)
             # output_feature = self.fpn(img)
             # features_lr.append(output_feature["level_l"])
@@ -206,17 +202,15 @@ class VGGT4MVS(nn.Module):
                         mvsnet_outputs = self.mvs_m(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
                     else:
                         # mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
-                        mvsnet_outputs = self.refinement(imgs_hr, depth_sample, depth_min, depth_max)
+                        mvsnet_outputs = self.refinement(imgs_hr[:, 0], depth_sample, depth_min, depth_max)
 
                     depth_hypo = mvsnet_outputs["depth"].unsqueeze(1)
-                    if s < 2:
+                    if s < 1:
                         # UPSAMPLING DEPTH MAP AND PIXEL-WISE VIEW WEIGHT FOR NEXT STAGE
                         depth_sample = F.interpolate(depth_hypo, scale_factor=2.0, mode='bilinear',
                                                      align_corners=False)
                         # view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear',
                         #                              align_corners=False)
-                    else:
-                        confs = mvsnet_outputs["photometric_confidence"]
 
                 infer_depths.append(depth_sample)
                 infer_confs.append(confs)
@@ -246,15 +240,17 @@ class VGGT4MVS(nn.Module):
                                                           depth_min, depth_max, (s == 0))
                 if s == 0:
                     mvsnet_outputs = self.mvs_l(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+                    output_depth = mvsnet_outputs["depth"].unsqueeze(1)
                 elif s == 1:
                     mvsnet_outputs = self.mvs_m(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+                    output_depth = mvsnet_outputs["depth"].unsqueeze(1)
                 else:
                     # mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
-                    mvsnet_outputs = self.refinement(imgs_hr, depth_sample, depth_min, depth_max)
-                output_depth = mvsnet_outputs["depth"].unsqueeze(1)
+                    mvsnet_outputs = self.refinement(imgs_hr[:, 0], depth_sample, depth_min, depth_max)
+                    output_depth = mvsnet_outputs["depth"]
                 output_depths.append(output_depth)  # [B,1,H,W]
                 depth_sample = output_depth.detach()
-                if s < 2:
+                if s < 1:
                     # UPSAMPLING DEPTH MAP AND PIXEL-WISE VIEW WEIGHT FOR NEXT STAGE
                     depth_sample = F.interpolate(depth_sample, scale_factor=2.0, mode='bilinear', align_corners=False)
                     # view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear', align_corners=False)
@@ -268,4 +264,143 @@ class VGGT4MVS(nn.Module):
                 "masks": output_mask,  # List(3)*[B,1,h',w']
                 "gt_depths": gts,  # List(3)*[B,1,h',w']
             }
-            # return output_depths, output_projs, output_feature, output_mask
+
+
+class CasMVSNet(nn.Module):
+    def __init__(self, G=None):
+        super(CasMVSNet, self).__init__()
+        if G is None:
+            G = [32, 16, 16]
+        self.G = G
+
+        self.mvs_l = MVSNet(G[0])
+        self.mvs_m = MVSNet(G[1], True)
+        self.mvs_h = MVSNet(G[2], True)
+        self.fpn = FeatureNet(8)
+
+    def forward(self, model, imgs, num_depths, depth_interal_ratio, iteration, pair=None, dtype=torch.float32):
+        # [N] imgs -> [1] ref + [N-1] srcs
+        imgs_hr = imgs["level_0"]
+        imgs_mr = imgs["level_1"]
+        imgs_lr = imgs["level_2"]
+        output_depths = []
+
+        # Step 1. Coarse Outputs: VGGT(frozen) -> depth/confidence/intrinsic/extrinsic/features (low-res)
+        extrinsic, intrinsic, vggt_depths, vggt_confs, _ = run_VGGT(model, imgs_lr, dtype=dtype)
+        depth_max, depth_min, mask = extract_depth_range(vggt_depths, vggt_confs, threshold=0.3, widen_threshold=0.2)
+        mask = mask.detach()
+        # HARD CODED HERE
+        depth_max = torch.full((extrinsic.size()[0],), 900, device=intrinsic.device)
+        depth_min = torch.full((extrinsic.size()[0],), 30, device=intrinsic.device)
+
+        view_weights = torch.empty(0, device=intrinsic.device)
+
+        output_mask = [
+            mask,
+            F.interpolate(mask, scale_factor=2.0, mode='nearest'),
+            F.interpolate(mask, scale_factor=4.0, mode='nearest')
+        ]
+
+        # Step 2. VGGT to MVS: condition intrinsic/extrinsic -> proj
+        proj_matrices_lr = postprocess_cams(intrinsic, extrinsic, 1)
+        proj_matrices_mr = postprocess_cams(intrinsic, extrinsic, 2.0)
+        proj_matrices_hr = postprocess_cams(intrinsic, extrinsic, 4.0)
+        proj_mats_lr = torch.unbind(proj_matrices_lr, dim=1)  # List: (N)[B,4,4]
+        proj_mats_mr = torch.unbind(proj_matrices_mr, dim=1)
+        proj_mats_hr = torch.unbind(proj_matrices_hr, dim=1)
+        proj_mats = [proj_mats_lr, proj_mats_mr, proj_mats_hr]  # List: (3)(N)[B,4,4]
+        # output_projs = {"level_l": proj_mats_lr, "level_m": proj_mats_mr, "level_h": proj_mats_hr}
+
+        # Step 3. Process Feature: feature_lr: (N)[B,16,H/4,W/4] feature_mr: (N)[B,16,H/2,W/2]
+        N = extrinsic.shape[1]
+        features_lr, features_mr, features_hr = [], [], []
+        for nview_idx in range(N):
+            img = imgs_mr[:, nview_idx]
+            output_feature = self.fpn(img)
+            features_lr.append(output_feature["level_l"])
+            features_mr.append(output_feature["level_m"])
+            features_hr.append(output_feature["level_h"])
+        features = [features_lr, features_mr, features_hr]
+
+        # Step 4. Combine ref and src views with pair file then process MVSNet
+        if pair is not None:  # EVALUATION MODE
+            _, nviews, _ = pair.shape
+            pair_unbind = torch.unbind(pair, dim=1)
+            infer_depths, infer_confs = [], []
+            for i in range(nviews):
+                depth_sample = vggt_depths[:, i].unsqueeze(1)  # [B,1,H,W]
+                confs = None
+                for s in range(3):
+                    ref_proj = proj_mats[s][i]
+                    src_projs = [proj_mats[s][j] for j in pair_unbind[i].squeeze(0)]
+                    ref_fea = features[s][i]
+                    src_feas = [features[s][j] for j in pair_unbind[i].squeeze(0)]
+
+                    depth_hypos = get_cur_depth_range_samples(depth_sample, num_depths[s], depth_interal_ratio[s],
+                                                              depth_min, depth_max, (s == 0))
+                    if s == 0:
+                        mvsnet_outputs = self.mvs_l(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+                    elif s == 1:
+                        mvsnet_outputs = self.mvs_m(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+                    else:
+                        mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+
+                    depth_hypo = mvsnet_outputs["depth"].unsqueeze(1)
+                    if s < 2:
+                        # UPSAMPLING DEPTH MAP AND PIXEL-WISE VIEW WEIGHT FOR NEXT STAGE
+                        depth_sample = F.interpolate(depth_hypo, scale_factor=2.0, mode='bilinear',
+                                                     align_corners=False)
+                        # view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear',
+                        #                              align_corners=False)
+
+                infer_depths.append(depth_sample)
+                infer_confs.append(confs)
+
+            # TODO: USING VGGT CONFIDENCE, MAYBE PHOTOMETRIC CONFIDENCE BETTER?
+            vggt_confs = F.interpolate(vggt_confs, scale_factor=4.0, mode='bilinear', align_corners=False)
+            vggt_confs = torch.unbind(vggt_confs, dim=1)
+
+            # List(N)*[B,1,H,W] List(N)*[B,1,H,W] [B,N,3,3] [B,N,4,4]
+            return {
+                "depths": infer_depths,
+                "photo_confs": infer_confs,
+                "vggt_confs": vggt_confs,
+                # "depths": vggt_d,
+                "intrinsic": intrinsic,
+                "extrinsic": extrinsic
+            }
+
+        else:  # TRAIN MODE
+            # output_projs = output_cams_loss(intrinsic, extrinsic, 0.5)
+            depth_sample = vggt_depths[:, 0].unsqueeze(1)
+            for s in range(3):
+                ref_proj, src_projs = proj_mats[s][0], proj_mats[s][1:]
+                ref_fea, src_feas = features[s][0], features[s][1:]
+                depth_hypos = get_cur_depth_range_samples(depth_sample, num_depths[s], depth_interal_ratio[s],
+                                                          depth_min, depth_max, (s == 0))
+                if s == 0:
+                    mvsnet_outputs = self.mvs_l(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+                    output_depth = mvsnet_outputs["depth"].unsqueeze(1)
+                    view_weights = mvsnet_outputs["view_weights"]
+                elif s == 1:
+                    mvsnet_outputs = self.mvs_m(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+                    output_depth = mvsnet_outputs["depth"].unsqueeze(1)
+                else:
+                    mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
+                    output_depth = mvsnet_outputs["depth"]
+                output_depths.append(output_depth)  # [B,1,H,W]
+                depth_sample = output_depth.detach()
+                if s < 2:
+                    # UPSAMPLING DEPTH MAP AND PIXEL-WISE VIEW WEIGHT FOR NEXT STAGE
+                    depth_sample = F.interpolate(depth_sample, scale_factor=2.0, mode='bilinear', align_corners=False)
+                    view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear', align_corners=False)
+
+            gt_depths = vggt_depths[:, 0].unsqueeze(1).detach()  # [B,N,H,W]->[B,H,W]->[B,1,H,W]
+            gt_m = F.interpolate(gt_depths, scale_factor=2.0, mode='bilinear', align_corners=False)
+            gt_h = F.interpolate(gt_depths, scale_factor=4.0, mode='bilinear', align_corners=False)
+            gts = [gt_depths, gt_m, gt_h]
+            return {
+                "depths": output_depths,  # List(3)*[B,1,h',w']
+                "masks": output_mask,  # List(3)*[B,1,h',w']
+                "gt_depths": gts,  # List(3)*[B,1,h',w']
+            }

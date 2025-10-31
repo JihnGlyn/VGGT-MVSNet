@@ -1,14 +1,15 @@
 from model.modules import *
 from model.submodules import *
+import math
 
 
 class MVSNet(nn.Module):
-    def __init__(self, G, big=True, pwn=True):
+    def __init__(self, G, big=True):
         super(MVSNet, self).__init__()
         self.G = G
         self.reg_net = CostRegNet(G, deep=True) if big else CostRegNet(G)
         self.softmax = nn.LogSoftmax(dim=1)
-        self.pixel_wise_net = PixelwiseNet(self.G) if pwn else None
+        self.pixel_wise_net = PixelwiseNet(self.G)
 
     def forward(self, ref_feature, src_features, ref_proj, src_projs, depth_sample, view_weights, wta=False):
         _, num_depth, height, width = depth_sample.shape
@@ -17,7 +18,6 @@ class MVSNet(nn.Module):
 
         device = ref_feature.device
 
-        # num_depth = depth_sample.size()[1]
         assert (
                 len(src_features) == len(src_projs)
         ), "Evaluation: Different number of images and projection matrices"
@@ -68,5 +68,61 @@ class MVSNet(nn.Module):
             "photometric_confidence": conf,
             "prob_volume": score,
             "view_weights": view_weights.detach(),
+        }
+        return output_stage
+
+
+class MVSNet_wo_vw(nn.Module):
+    def __init__(self, G, big=True):
+        super(MVSNet_wo_vw, self).__init__()
+        self.G = G
+        self.reg_net = CostRegNet(G, deep=True) if big else CostRegNet(G)
+        self.softmax = nn.LogSoftmax(dim=1)
+
+    def forward(self, ref_feature, src_features, ref_proj, src_projs, depth_sample, view_weights, wta=False):
+        _, num_depth, height, width = depth_sample.shape
+        batch, feature_channel, _, _ = ref_feature.size()
+        ref_feature = F.interpolate(ref_feature, size=(height, width), mode='bilinear', align_corners=False)
+
+        device = ref_feature.device
+
+        assert (
+                len(src_features) == len(src_projs)
+        ), "Evaluation: Different number of images and projection matrices"
+
+        # Change to a tensor with value 1e-5
+        cor_feats = 0
+        ref_feature = ref_feature.view(batch, self.G, feature_channel // self.G, 1, height, width)
+        cor_weight_sum = 1e-8
+
+        i = 0
+        for src_feature, src_proj in zip(src_features, src_projs):
+            warped_feature = homo_warping(
+                src_feature, src_proj, ref_proj, depth_sample
+            ).view(batch, self.G, feature_channel // self.G, num_depth, height, width)
+            # group-wise correlation
+            cor_feat = (warped_feature * ref_feature).mean(2)
+            del warped_feature, src_feature, src_proj
+
+            cor_weight = torch.softmax(cor_feat.sum(1) / 2, 1) / math.sqrt(feature_channel)  # B D H W
+            cor_weight_sum += cor_weight    # B D H W
+            cor_feats += cor_weight.unsqueeze(1) * cor_feat  # B C D H W
+            del cor_weight, cor_feat
+
+        cost_volume = cor_feats / cor_weight_sum.unsqueeze(1)  # B G D H W
+        del cor_weight_sum, src_features
+
+        score = self.reg_net(cost_volume).squeeze(1)     # [B,G,Ndepth,H,W] -> [B,D,H,W]
+        # apply softmax to get probability
+        score = torch.exp(self.softmax(score))
+
+        depth = depth_regression(score, depth_sample)
+        conf = conf_regression(score, 4)
+
+        output_stage = {
+            "depth": depth,
+            "photometric_confidence": conf,
+            "prob_volume": score,
+            "view_weights": None
         }
         return output_stage
