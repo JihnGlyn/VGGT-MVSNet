@@ -73,13 +73,14 @@ class FeatureNet(nn.Module):
 class FeatureFuse(nn.Module):
     def __init__(self, base_channels=64, out_channels=64):
         super(FeatureFuse, self).__init__()
-        self.deconv1 = Deconv2d(in_channels=256, out_channels=base_channels, stride=2, padding=1, output_padding=1)
-        self.conv1 = ConvBnReLU(3, base_channels, kernel_size=3, pad=1)
-        self.fuse1 = ConvBnReLU(base_channels * 2, out_channels, kernel_size=3, pad=1)
+        self.deconv1 = Deconv2d(in_channels=128, out_channels=base_channels, stride=2, padding=1, output_padding=1)
+        self.conv1 = ConvBnReLU(3, 8, kernel_size=3, pad=1)
+        self.conv2 = ConvBnReLU(8, 16, kernel_size=3, pad=1)
+        self.fuse1 = nn.Conv2d(base_channels+16, out_channels, kernel_size=3, padding=1)
 
     def forward(self, image, vggt_feature):
         # image:[B,3,H/2,W/2] vggt_feature:[B,16,H/4,W/4]
-        conv = self.conv1(image)
+        conv = self.conv2(self.conv1(image))
         deconv = self.deconv1(vggt_feature)
         fuse = self.fuse1(torch.cat((conv, deconv), dim=1))
         # fuse:[B,16,H/2,W/2]

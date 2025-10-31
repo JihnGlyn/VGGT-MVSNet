@@ -69,14 +69,14 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 predictions["pose_enc_list"] = pose_enc_list
                 
             if self.depth_head is not None:
-                depth, depth_conf = self.depth_head(
+                depth, depth_conf, _ = self.depth_head(
                     aggregated_tokens_list, images=images, patch_start_idx=patch_start_idx
                 )
                 predictions["depth"] = depth
                 predictions["depth_conf"] = depth_conf
 
             if self.point_head is not None:
-                pts3d, pts3d_conf = self.point_head(
+                pts3d, pts3d_conf, _ = self.point_head(
                     aggregated_tokens_list, images=images, patch_start_idx=patch_start_idx
                 )
                 predictions["world_points"] = pts3d

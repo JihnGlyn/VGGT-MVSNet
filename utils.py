@@ -1,8 +1,40 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import json
+import os
+
 import numpy as np
+import torch
 import torchvision.utils as vutils
+
+
+def load_config_from_json(myparser, json_file_path='./config/default.json'):
+    args = myparser.parse_args()
+    try:
+        with open(json_file_path, 'r') as f:
+            config = json.load(f)
+        for key, value in config.items():
+            if hasattr(args, key):
+                setattr(args, key, value)
+            else:
+                print(f"Warning: Key '{key}' in JSON file is not a valid argument.")
+    except FileNotFoundError:
+        print(f"Error: JSON file '{json_file_path}' not found.")
+    except json.JSONDecodeError:
+        print(f"Error: Failed to decode JSON file '{json_file_path}'.")
+
+    return args
+
+
+def save_checkpoint(epoch, model, optimizer, path, ckpt_name='checkpoint'):
+    savepath = os.path.join(path, ckpt_name+'.pth')
+
+    model_state = model.state_dict()
+
+    state = {
+        'epoch': epoch,
+        'model_state_dict': model_state,
+        'optimizer_state_dict': optimizer.state_dict(),
+    }
+    torch.save(state, savepath)
 
 
 def freeze_model(model):
@@ -186,3 +218,40 @@ def Thres_metrics(depth_est, depth_gt, mask, thres):
 def AbsDepthError_metrics(depth_est, depth_gt, mask):
     depth_est, depth_gt = depth_est[mask], depth_gt[mask]
     return torch.mean((depth_est - depth_gt).abs())
+
+
+# NOTE: please do not use this to build up training loss
+@make_nograd_func
+@compute_metrics_for_each_image
+def absolute_depth_error_metrics(depth_est: torch.Tensor, depth_gt: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Calculate average absolute depth error
+
+    Args:
+        depth_est: estimated depth map
+        depth_gt: ground truth depth map
+        mask: mask
+    """
+    depth_est, depth_gt = depth_est[mask], depth_gt[mask]
+    return torch.mean((depth_est - depth_gt).abs())
+
+
+@make_nograd_func
+@compute_metrics_for_each_image
+def threshold_metrics(
+    depth_est: torch.Tensor, depth_gt: torch.Tensor, mask: torch.Tensor, threshold: float
+) -> torch.Tensor:
+    """Return error rate for where absolute error is larger than threshold.
+
+    Args:
+        depth_est: estimated depth map
+        depth_gt: ground truth depth map
+        mask: mask
+        threshold: threshold
+
+    Returns:
+        error rate: error rate of the depth map
+    """
+    depth_est, depth_gt = depth_est[mask], depth_gt[mask]
+    errors = torch.abs(depth_est - depth_gt).float()
+    err_mask = errors > threshold
+    return torch.mean(err_mask.float())
