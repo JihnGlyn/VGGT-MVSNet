@@ -28,8 +28,8 @@ def run_VGGT(model, images, dtype=torch.float32):
     last_row = torch.tensor([0, 0, 0, 1], dtype=extrinsic.dtype, device=extrinsic.device).expand(B, N, 1, 4)
     extrinsic = torch.cat((extrinsic, last_row), dim=2)
 
-    depth_map = depth_map * 200
-    extrinsic[:, :, :3, 3] = extrinsic[:, :, :3, 3] * 200
+    depth_map = depth_map * 600
+    extrinsic[:, :, :3, 3] = extrinsic[:, :, :3, 3] * 600
 
     # extrinsic[B,N,4,4] intrinsic[B,N,3,3] depth[B,N,H,W] conf[B,N,H,W] feature[B,N,128,H,W]
     return extrinsic, intrinsic, depth_map.squeeze(-1), depth_conf, feature
@@ -126,12 +126,10 @@ class VGGT4MVS(nn.Module):
 
         self.mvs_l = MVSNet(G[0])
         self.mvs_m = MVSNet(G[1], True)
-        # self.mvs_h = MVSNet(G[2], True)
         self.fuse = FeatureFuse(base_channels=64, out_channels=64)
-        # self.fpn = FeatureNet(8)
         self.refinement = RefineNet(base_channels=8)
 
-    def forward(self, vggt_outputs, imgs, num_depths, depth_interal_ratio, iteration, pair=None):
+    def forward(self, vggt_outputs, imgs, num_depths, depth_interal_ratio, iteration, pair=None, refine=False):
         # [N] imgs -> [1] ref + [N-1] srcs
         imgs_hr = imgs["level_0"]
         imgs_mr = imgs["level_1"]
@@ -143,8 +141,8 @@ class VGGT4MVS(nn.Module):
         depth_max, depth_min, mask = extract_depth_range(vggt_depths, vggt_confs, threshold=0.3, widen_threshold=0.2)
         mask = mask.detach()
         # HARD CODED HERE
-        depth_max = torch.full((extrinsic.size()[0],), 900, device=intrinsic.device)
-        depth_min = torch.full((extrinsic.size()[0],), 30, device=intrinsic.device)
+        depth_max = torch.full((extrinsic.size()[0],), 950, device=intrinsic.device)
+        depth_min = torch.full((extrinsic.size()[0],), 200, device=intrinsic.device)
 
         view_weights = torch.empty(0, device=intrinsic.device)
 
@@ -166,17 +164,11 @@ class VGGT4MVS(nn.Module):
 
         # Step 3. Process Feature: feature_lr: (N)[B,16,H/4,W/4] feature_mr: (N)[B,16,H/2,W/2]
         N = extrinsic.shape[1]
-        # features_lr, features_mr, features_hr = [], [], []
         fuse_fea = []
         for nview_idx in range(N):
             img = imgs_mr[:, nview_idx]
             fuse = self.fuse(img, vggt_fea[nview_idx])
             fuse_fea.append(fuse)
-            # output_feature = self.fpn(img)
-            # features_lr.append(output_feature["level_l"])
-            # features_mr.append(output_feature["level_m"])
-            # features_hr.append(output_feature["level_h"])
-        # features = [features_lr, features_mr, features_hr]
         features = [vggt_fea, fuse_fea, fuse_fea]
 
         # Step 4. Combine ref and src views with pair file then process MVSNet
@@ -200,16 +192,15 @@ class VGGT4MVS(nn.Module):
                     elif s == 1:
                         mvsnet_outputs = self.mvs_m(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
                     else:
-                        # mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
-                        mvsnet_outputs = self.refinement(imgs_hr[:, 0], depth_sample, depth_min, depth_max)
+                        if refine:
+                            mvsnet_outputs = self.refinement(imgs_hr[:, 0], depth_sample, depth_min, depth_max)
+                        else:
+                            mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
 
                     depth_hypo = mvsnet_outputs["depth"].unsqueeze(1)
-                    if s < 1:
-                        # UPSAMPLING DEPTH MAP AND PIXEL-WISE VIEW WEIGHT FOR NEXT STAGE
+                    if (s < 1 and refine) or (s < 2 and not refine):
                         depth_sample = F.interpolate(depth_hypo, scale_factor=2.0, mode='bilinear',
                                                      align_corners=False)
-                        # view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear',
-                        #                              align_corners=False)
 
                 infer_depths.append(depth_sample)
                 infer_confs.append(confs)
@@ -227,7 +218,6 @@ class VGGT4MVS(nn.Module):
                 "intrinsic": intrinsic,
                 "extrinsic": extrinsic
             }
-            # return infer_depths, infer_confs, out_intr, extrinsic, vggt_confs
 
         else:  # TRAIN MODE
             # output_projs = output_cams_loss(intrinsic, extrinsic, 0.5)
@@ -244,15 +234,15 @@ class VGGT4MVS(nn.Module):
                     mvsnet_outputs = self.mvs_m(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
                     output_depth = mvsnet_outputs["depth"].unsqueeze(1)
                 else:
-                    # mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
-                    mvsnet_outputs = self.refinement(imgs_hr[:, 0], depth_sample, depth_min, depth_max)
+                    if refine:
+                        mvsnet_outputs = self.refinement(imgs_hr[:, 0], depth_sample, depth_min, depth_max)
+                    else:
+                        mvsnet_outputs = self.mvs_h(ref_fea, src_feas, ref_proj, src_projs, depth_hypos, view_weights)
                     output_depth = mvsnet_outputs["depth"]
                 output_depths.append(output_depth)  # [B,1,H,W]
                 depth_sample = output_depth.detach()
-                if s < 1:
-                    # UPSAMPLING DEPTH MAP AND PIXEL-WISE VIEW WEIGHT FOR NEXT STAGE
+                if (s < 1 and refine) or (s < 2 and not refine):
                     depth_sample = F.interpolate(depth_sample, scale_factor=2.0, mode='bilinear', align_corners=False)
-                    # view_weights = F.interpolate(view_weights, scale_factor=2.0, mode='bilinear', align_corners=False)
 
             gt_depths = vggt_depths[:, 0].unsqueeze(1).detach()  # [B,N,H,W]->[B,H,W]->[B,1,H,W]
             gt_m = F.interpolate(gt_depths, scale_factor=2.0, mode='bilinear', align_corners=False)
@@ -265,11 +255,12 @@ class VGGT4MVS(nn.Module):
             }
 
 
+# ==================================================================================================================== #
 class CasMVSNet(nn.Module):
     def __init__(self, G=None):
         super(CasMVSNet, self).__init__()
         if G is None:
-            G = [8, 8, 8]
+            G = [32, 16, 16]
         self.G = G
 
         self.mvs_l = MVSNet(G[0])
@@ -287,8 +278,8 @@ class CasMVSNet(nn.Module):
         depth_max, depth_min, mask = extract_depth_range(vggt_depths, vggt_confs, threshold=0.3, widen_threshold=0.2)
         mask = mask.detach()
         # HARD CODED HERE
-        depth_max = torch.full((extrinsic.size()[0],), 900, device=intrinsic.device)
-        depth_min = torch.full((extrinsic.size()[0],), 30, device=intrinsic.device)
+        depth_max = torch.full((extrinsic.size()[0],), 950, device=intrinsic.device)
+        depth_min = torch.full((extrinsic.size()[0],), 200, device=intrinsic.device)
 
         view_weights = torch.empty(0, device=intrinsic.device)
 
